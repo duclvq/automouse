@@ -471,7 +471,13 @@ def observe_after_click(
     (question, answer) to answers_db and persist."""
     if not question:
         return
-    shot = pyautogui.screenshot(region=roi)
+    # Give the app a beat to render the "correct answer is" reveal.
+    time.sleep(0.6)
+    try:
+        shot = pyautogui.screenshot(region=roi)
+    except Exception as e:
+        _emit(f"[memory] post-click screenshot failed: {e}", on_log)
+        return
     obs = ocr_image(shot)
     answer = find_answer_after_anchor(obs, anchor)
     q_summary = _short(extract_question_sentence(obs))
@@ -943,7 +949,14 @@ def run_detection_loop(
                     tk_root.update()
                 except tk.TclError:
                     tk_root = None
-            shot = pyautogui.screenshot(region=roi)
+            try:
+                shot = pyautogui.screenshot(region=roi)
+            except Exception as e:
+                # macOS screencapture occasionally writes an unreadable PNG;
+                # log, sleep briefly, and try again next cycle.
+                _emit(f"[loop] screenshot failed: {e}; retrying", on_log)
+                _sleep_with_check(0.5, stopper, tk_root)
+                continue
             haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
 
             circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
