@@ -99,3 +99,28 @@ def test_list_rectangle_templates_empty_dir(tmp_path: Path):
 
 def test_list_rectangle_templates_missing_dir(tmp_path: Path):
     assert list_rectangle_templates(tmp_path / "does_not_exist") == []
+
+
+from automouse import next_rectangle_number
+
+
+def test_next_rectangle_number_empty_dir(tmp_path: Path):
+    assert next_rectangle_number(tmp_path) == 1
+
+
+def test_next_rectangle_number_missing_dir(tmp_path: Path):
+    assert next_rectangle_number(tmp_path / "missing") == 1
+
+
+def test_next_rectangle_number_with_gaps(tmp_path: Path):
+    (tmp_path / "001.png").write_bytes(b"")
+    (tmp_path / "003.png").write_bytes(b"")
+    # max + 1, NOT first gap.
+    assert next_rectangle_number(tmp_path) == 4
+
+
+def test_next_rectangle_number_ignores_non_matching(tmp_path: Path):
+    (tmp_path / "001.png").write_bytes(b"")
+    (tmp_path / "999.txt").write_bytes(b"")
+    (tmp_path / "abc.png").write_bytes(b"")
+    assert next_rectangle_number(tmp_path) == 2

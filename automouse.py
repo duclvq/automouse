@@ -108,6 +108,15 @@ def list_rectangle_templates(directory: Path) -> List[Path]:
     )
 
 
+def next_rectangle_number(directory: Path) -> int:
+    """Return max existing NNN integer + 1, or 1 if none."""
+    paths = list_rectangle_templates(directory)
+    if not paths:
+        return 1
+    nums = [int(_RECT_NAME_RE.match(p.name).group(1)) for p in paths]
+    return max(nums) + 1
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
