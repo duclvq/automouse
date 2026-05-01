@@ -172,6 +172,25 @@ def color_mask(image: Image.Image, target_rgb: Tuple[int, int, int],
     return np.all(diff <= tolerance, axis=-1)
 
 
+def largest_connected_region(mask: np.ndarray) -> Optional[BBox]:
+    """Return (x, y, w, h) bbox of the largest True-region in `mask`,
+    or None if no True pixels. Uses cv2.connectedComponentsWithStats."""
+    if not mask.any():
+        return None
+    n, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8), connectivity=8)
+    # Label 0 is background. Pick the largest of labels 1..n-1.
+    if n <= 1:
+        return None
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    idx = int(np.argmax(areas)) + 1  # +1 because we skipped label 0
+    x = int(stats[idx, cv2.CC_STAT_LEFT])
+    y = int(stats[idx, cv2.CC_STAT_TOP])
+    w = int(stats[idx, cv2.CC_STAT_WIDTH])
+    h = int(stats[idx, cv2.CC_STAT_HEIGHT])
+    return (x, y, w, h)
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)

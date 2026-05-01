@@ -241,3 +241,33 @@ def test_color_mask_mixed():
     img.putpixel((3, 0), (0, 128, 255))     # exact
     mask = color_mask(img, (0, 128, 255), tolerance=25)
     assert mask.tolist() == [[True, True, False, True]]
+
+
+from automouse import largest_connected_region
+
+
+def test_largest_connected_region_returns_bbox():
+    mask = np.zeros((100, 100), dtype=bool)
+    # 30 wide x 10 tall stripe at (x=20..50, y=40..50)
+    mask[40:50, 20:50] = True
+    bbox = largest_connected_region(mask)
+    assert bbox == (20, 40, 30, 10)
+
+
+def test_largest_connected_region_picks_largest():
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[5:15, 5:25] = True       # 20 x 10 = 200 px
+    mask[60:90, 60:80] = True     # 20 x 30 = 600 px
+    bbox = largest_connected_region(mask)
+    assert bbox == (60, 60, 20, 30)
+
+
+def test_largest_connected_region_empty_mask():
+    mask = np.zeros((50, 50), dtype=bool)
+    assert largest_connected_region(mask) is None
+
+
+def test_largest_connected_region_single_pixel():
+    mask = np.zeros((10, 10), dtype=bool)
+    mask[5, 7] = True
+    assert largest_connected_region(mask) == (7, 5, 1, 1)
