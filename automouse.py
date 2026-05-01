@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 TEMPLATES_DIR = Path("templates")
 CONFIG_PATH = TEMPLATES_DIR / "config.json"
 CIRCLE_PATH = TEMPLATES_DIR / "circle.png"
-RECTANGLE_PATH = TEMPLATES_DIR / "rectangle.png"
+RECTANGLES_DIR = TEMPLATES_DIR / "rectangles"
 
 MATCH_THRESHOLD = 0.8
 MIN_DELAY = 0.17
@@ -381,6 +381,8 @@ def run_detection_loop() -> None:
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0  # we manage our own per-step delays
 
+    migrate_legacy_rectangle(TEMPLATES_DIR)
+
     roi = load_roi(CONFIG_PATH)
     if roi is None:
         print("Missing ROI config; run the GUI first.")
@@ -388,22 +390,40 @@ def run_detection_loop() -> None:
     rx, ry, rw, rh = roi
 
     circle_tpl = cv2.imread(str(CIRCLE_PATH), cv2.IMREAD_GRAYSCALE)
-    rect_tpl = cv2.imread(str(RECTANGLE_PATH), cv2.IMREAD_GRAYSCALE)
-    if circle_tpl is None or rect_tpl is None:
-        print("Missing template files; run the GUI first.")
+    if circle_tpl is None:
+        print("Missing circle template; run the GUI first.")
         return
 
-    for tpl, name in ((circle_tpl, "circle"), (rect_tpl, "rectangle")):
+    rectangle_paths = list_rectangle_templates(RECTANGLES_DIR)
+    if not rectangle_paths:
+        print("No rectangle templates; run the GUI first.")
+        return
+
+    rectangle_templates: List[Tuple[str, np.ndarray]] = []
+    for path in rectangle_paths:
+        tpl = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if tpl is None:
+            print(f"Could not read {path}, skipping.")
+            continue
+        rectangle_templates.append((path.name, tpl))
+    if not rectangle_templates:
+        print("All rectangle templates failed to load.")
+        return
+
+    for tpl, name in [(circle_tpl, "circle")] + [
+            (t, n) for n, t in rectangle_templates]:
         th, tw = tpl.shape[:2]
         if tw > rw or th > rh:
-            print(f"{name} template ({tw}x{th}) is larger than ROI ({rw}x{rh}).")
+            print(f"{name} template ({tw}x{th}) is larger than ROI "
+                  f"({rw}x{rh}).")
             return
 
     stopper = _HoldToStop()
 
-    print(f"Running detection loop. ROI={roi}. Stop with: Ctrl+C, "
-          f"hold '{STOP_HOLD_KEY}' for {STOP_HOLD_SECONDS}s, or move "
-          f"mouse to a screen corner.")
+    print(f"Running detection loop. ROI={roi}. "
+          f"{len(rectangle_templates)} rectangle template(s). "
+          f"Stop with: Ctrl+C, hold '{STOP_HOLD_KEY}' for "
+          f"{STOP_HOLD_SECONDS}s, or move mouse to a screen corner.")
 
     cycle = 0
     cycles_until_break = random.randint(BREAK_AFTER_MIN_CYCLES,
@@ -415,16 +435,20 @@ def run_detection_loop() -> None:
             haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
 
             circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
-            picked_circle = [random.choice(circle_matches)] if circle_matches else []
+            picked_circle = (
+                [random.choice(circle_matches)] if circle_matches else [])
             print(f"  circles:    {len(circle_matches)} match(es), "
                   f"clicking {len(picked_circle)}")
             _click_all(picked_circle, circle_tpl.shape, roi, stopper)
             if stopper.check():
                 break
 
-            rect_matches = find_matches(haystack, rect_tpl, MATCH_THRESHOLD)
-            print(f"  rectangles: {len(rect_matches)} match(es)")
-            _click_all(rect_matches, rect_tpl.shape, roi, stopper)
+            for name, tpl in rectangle_templates:
+                matches = find_matches(haystack, tpl, MATCH_THRESHOLD)
+                print(f"  {name}: {len(matches)} match(es)")
+                _click_all(matches, tpl.shape, roi, stopper)
+                if stopper.check():
+                    break
             if stopper.check():
                 break
 
@@ -439,8 +463,6 @@ def run_detection_loop() -> None:
                                                     BREAK_AFTER_MAX_CYCLES)
             else:
                 _sleep_with_check(random.uniform(MIN_DELAY, MAX_DELAY), stopper)
-        print(f"'{STOP_HOLD_KEY}' held for "
-              f"{STOP_HOLD_SECONDS}s — stopping.")
     except pyautogui.FailSafeException:
         print("Failsafe triggered. Exiting.")
         sys.exit(0)
