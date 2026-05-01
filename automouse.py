@@ -4,8 +4,11 @@ import cv2
 import json
 import math
 import numpy as np
+import pyautogui
+import time
 import tkinter as tk
 from pathlib import Path
+from PIL import Image
 from tkinter import messagebox
 from typing import List, Optional, Tuple
 
@@ -87,15 +90,28 @@ class App:
 
         self.refresh_status()
 
-    # Stubs — filled in by later tasks.
     def on_set_roi(self) -> None:
-        messagebox.showinfo("Automouse", "Set ROI not implemented yet")
+        result = _capture_rectangle(self.root)
+        if result is None:
+            return
+        _, rect = result
+        save_roi(CONFIG_PATH, rect)
+        self.refresh_status()
 
     def on_capture_circle(self) -> None:
-        messagebox.showinfo("Automouse", "Capture circle not implemented yet")
+        self._capture_template_to(CIRCLE_PATH)
 
     def on_capture_rectangle(self) -> None:
-        messagebox.showinfo("Automouse", "Capture rectangle not implemented yet")
+        self._capture_template_to(RECTANGLE_PATH)
+
+    def _capture_template_to(self, path: Path) -> None:
+        result = _capture_rectangle(self.root)
+        if result is None:
+            return
+        screenshot, (x, y, w, h) = result
+        path.parent.mkdir(parents=True, exist_ok=True)
+        screenshot.crop((x, y, x + w, y + h)).save(path)
+        self.refresh_status()
 
     def on_run(self) -> None:
         messagebox.showinfo("Automouse", "Run not implemented yet")
@@ -113,6 +129,73 @@ class App:
                      and CIRCLE_PATH.exists()
                      and RECTANGLE_PATH.exists())
         self.run_btn.config(state=tk.NORMAL if all_ready else tk.DISABLED)
+
+
+def _capture_rectangle(root: tk.Tk) -> Optional[Tuple[Image.Image, Tuple[int, int, int, int]]]:
+    """
+    Hide root, take fullscreen screenshot, show it on a borderless Toplevel,
+    let the user drag a rectangle, return (full_screenshot, (x, y, w, h)) or
+    None if cancelled with Escape.
+    """
+    root.withdraw()
+    time.sleep(0.3)
+    screenshot = pyautogui.screenshot()
+    sw, sh = screenshot.size
+
+    overlay = tk.Toplevel(root)
+    overlay.overrideredirect(True)
+    overlay.geometry(f"{sw}x{sh}+0+0")
+    overlay.attributes("-topmost", True)
+
+    canvas = tk.Canvas(overlay, width=sw, height=sh, highlightthickness=0,
+                       cursor="crosshair")
+    canvas.pack()
+
+    tk_img = _pil_to_tk(screenshot)  # keep reference
+    canvas.create_image(0, 0, anchor="nw", image=tk_img)
+    canvas.image = tk_img  # prevent GC
+
+    state = {"x0": 0, "y0": 0, "rect_id": None, "result": None}
+
+    def on_press(e):
+        state["x0"], state["y0"] = e.x, e.y
+        state["rect_id"] = canvas.create_rectangle(
+            e.x, e.y, e.x, e.y, outline="red", width=2)
+
+    def on_drag(e):
+        if state["rect_id"] is not None:
+            canvas.coords(state["rect_id"], state["x0"], state["y0"], e.x, e.y)
+
+    def on_release(e):
+        x0, y0 = state["x0"], state["y0"]
+        x1, y1 = e.x, e.y
+        x, y = min(x0, x1), min(y0, y1)
+        w, h = abs(x1 - x0), abs(y1 - y0)
+        if w >= 5 and h >= 5:
+            state["result"] = (x, y, w, h)
+        overlay.destroy()
+
+    def on_escape(_e):
+        state["result"] = None
+        overlay.destroy()
+
+    canvas.bind("<ButtonPress-1>", on_press)
+    canvas.bind("<B1-Motion>", on_drag)
+    canvas.bind("<ButtonRelease-1>", on_release)
+    overlay.bind("<Escape>", on_escape)
+    overlay.focus_force()
+    overlay.wait_window()
+
+    root.deiconify()
+    if state["result"] is None:
+        return None
+    return screenshot, state["result"]
+
+
+def _pil_to_tk(image: Image.Image):
+    # Local import — only needed when GUI is in use, and avoids hard-coupling at module load.
+    from PIL import ImageTk
+    return ImageTk.PhotoImage(image)
 
 
 def main() -> None:
