@@ -13,8 +13,13 @@ import tkinter as tk
 from difflib import SequenceMatcher
 from pathlib import Path
 from PIL import Image
+import Vision
+import objc
+from Foundation import NSData
 from Quartz import (
     CGEventSourceKeyState,
+    CGImageSourceCreateImageAtIndex,
+    CGImageSourceCreateWithData,
     CGWarpMouseCursorPosition,
     kCGEventSourceStateHIDSystemState,
 )
@@ -274,6 +279,56 @@ def load_answers_db(path: Path) -> List[Dict[str, str]]:
     if not path.exists():
         return []
     return json.loads(path.read_text())
+
+
+def _pil_to_cgimage(image: Image.Image):
+    """PIL.Image → CGImage via PNG bytes."""
+    import io
+    buf = io.BytesIO()
+    image.convert("RGB").save(buf, format="PNG")
+    data = NSData.dataWithBytes_length_(buf.getvalue(), len(buf.getvalue()))
+    src = CGImageSourceCreateWithData(data, None)
+    if src is None:
+        raise RuntimeError("CGImageSourceCreateWithData returned None")
+    cg = CGImageSourceCreateImageAtIndex(src, 0, None)
+    if cg is None:
+        raise RuntimeError("CGImageSourceCreateImageAtIndex returned None")
+    return cg
+
+
+def ocr_image(image: Image.Image) -> List[Tuple[str, BBox]]:
+    """Run Apple Vision text recognition on a PIL image. Returns
+    [(text, (x, y, w, h)), ...] in pixel coords with top-left origin.
+    Returns [] when no text is found."""
+    cg = _pil_to_cgimage(image)
+    request = Vision.VNRecognizeTextRequest.alloc().init()
+    request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+    request.setUsesLanguageCorrection_(True)
+
+    handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(
+        cg, {})
+    success, error = handler.performRequests_error_([request], None)
+    if not success:
+        raise RuntimeError(f"Vision OCR failed: {error}")
+
+    results = request.results() or []
+    img_w, img_h = image.size
+    out: List[Tuple[str, BBox]] = []
+    for obs in results:
+        cands = obs.topCandidates_(1)
+        if not cands:
+            continue
+        text = str(cands[0].string())
+        # boundingBox is normalized [0..1] with origin bottom-left.
+        bb = obs.boundingBox()
+        nx, ny, nw, nh = bb.origin.x, bb.origin.y, bb.size.width, bb.size.height
+        x = int(round(nx * img_w))
+        w = int(round(nw * img_w))
+        h = int(round(nh * img_h))
+        # Convert origin from bottom-left to top-left.
+        y_top = int(round((1.0 - ny - nh) * img_h))
+        out.append((text, (x, y_top, w, h)))
+    return out
 
 
 class App:
