@@ -331,6 +331,73 @@ def ocr_image(image: Image.Image) -> List[Tuple[str, BBox]]:
     return out
 
 
+def try_click_known_answer(
+    shot: Image.Image,
+    ocr_obs: List[Tuple[str, BBox]],
+    answers_db: List[Dict[str, str]],
+    roi: ROI,
+    stopper: Optional["_HoldToStop"] = None,
+) -> bool:
+    """If OCR'd question matches a stored entry and the answer text is
+    visible, click its center and return True. Else return False."""
+    if not answers_db:
+        return False
+    question = normalize_ocr_text(ocr_obs)
+    if not question:
+        return False
+    match = find_question_match(question, answers_db, QUESTION_MATCH_THRESHOLD)
+    if match is None:
+        return False
+    ans_box = find_text_box(ocr_obs, match["answer"])
+    if ans_box is None:
+        print(f"  [memory] question matched but answer "
+              f"{match['answer']!r} not visible; falling back")
+        return False
+    rx, ry, _, _ = roi
+    x, y, w, h = ans_box
+    cx = rx + x + w // 2
+    cy = ry + y + h // 2
+    print(f"  [memory] clicking known answer {match['answer']!r}")
+    _human_move_to(cx, cy)
+    pyautogui.click()
+    delay = random.uniform(MIN_DELAY, MAX_DELAY)
+    if stopper is not None:
+        _sleep_with_check(delay, stopper)
+    else:
+        time.sleep(delay)
+    return True
+
+
+def observe_after_click(
+    roi: ROI,
+    blue_rgb: Tuple[int, int, int],
+    question: str,
+    answers_db: List[Dict[str, str]],
+) -> None:
+    """Re-screenshot, find the blue indicator region, OCR the row,
+    append (question, answer) to the in-memory db and write to disk."""
+    if not question:
+        return
+    shot = pyautogui.screenshot(region=roi)
+    mask = color_mask(shot, blue_rgb, BLUE_COLOR_TOLERANCE)
+    region = largest_connected_region(mask)
+    if region is None:
+        print("  [memory] no blue region found; skipping store")
+        return
+    obs = ocr_image(shot)
+    answer = text_in_region(obs, region).strip()
+    if not answer:
+        print("  [memory] blue region had no overlapping text; "
+              "skipping store")
+        return
+    for entry in answers_db:
+        if entry["question"] == question and entry["answer"] == answer:
+            return  # already stored
+    answers_db.append({"question": question, "answer": answer})
+    save_answers_db(ANSWERS_PATH, answers_db)
+    print(f"  [memory] stored answer {answer!r} for question")
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)
@@ -676,6 +743,11 @@ def run_detection_loop() -> None:
         print("All rectangle templates failed to load.")
         return
 
+    blue_rgb = load_blue_rgb(CONFIG_PATH)
+    answers_db = load_answers_db(ANSWERS_PATH)
+    if blue_rgb is None:
+        print("  [memory] blue_rgb not set; question/answer feature off")
+
     for tpl, name in [(circle_tpl, "circle")] + [
             (t, n) for n, t in rectangle_templates]:
         th, tw = tpl.shape[:2]
@@ -703,9 +775,23 @@ def run_detection_loop() -> None:
             circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
             picked_circle = (
                 [random.choice(circle_matches)] if circle_matches else [])
-            print(f"  circles:    {len(circle_matches)} match(es), "
-                  f"clicking {len(picked_circle)}")
-            _click_all(picked_circle, circle_tpl.shape, roi, stopper)
+
+            answer_clicked = False
+            ocr_obs: List[Tuple[str, BBox]] = []
+            question = ""
+            if blue_rgb is not None:
+                ocr_obs = ocr_image(shot)
+                question = normalize_ocr_text(ocr_obs)
+                answer_clicked = try_click_known_answer(
+                    shot, ocr_obs, answers_db, roi, stopper)
+
+            if not answer_clicked:
+                print(f"  circles:    {len(circle_matches)} match(es), "
+                      f"clicking {len(picked_circle)}")
+                _click_all(picked_circle, circle_tpl.shape, roi, stopper)
+                if blue_rgb is not None and question:
+                    observe_after_click(roi, blue_rgb, question, answers_db)
+
             if stopper.check():
                 break
 
