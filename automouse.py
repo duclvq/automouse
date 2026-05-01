@@ -40,6 +40,12 @@ MOVE_STEP_MAX_DELAY = 0.015
 MOVE_CURVE_STRENGTH = 0.18      # max perpendicular offset as fraction of distance
 MOVE_JITTER_PIXELS = 0.7        # stddev of per-step Gaussian jitter
 
+# Long breaks between bursts of cycles, to look more human.
+BREAK_AFTER_MIN_CYCLES = 10
+BREAK_AFTER_MAX_CYCLES = 30
+BREAK_MIN_SECONDS = 5.0
+BREAK_MAX_SECONDS = 10.0
+
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 
 
@@ -364,6 +370,10 @@ def run_detection_loop() -> None:
           f"hold '{STOP_HOLD_KEY}' for {STOP_HOLD_SECONDS}s, or move "
           f"mouse to a screen corner.")
 
+    cycle = 0
+    cycles_until_break = random.randint(BREAK_AFTER_MIN_CYCLES,
+                                        BREAK_AFTER_MAX_CYCLES)
+
     try:
         while not stopper.check():
             shot = pyautogui.screenshot(region=roi)
@@ -383,7 +393,17 @@ def run_detection_loop() -> None:
             if stopper.check():
                 break
 
-            _sleep_with_check(random.uniform(MIN_DELAY, MAX_DELAY), stopper)
+            cycle += 1
+            if cycle >= cycles_until_break:
+                pause = random.uniform(BREAK_MIN_SECONDS, BREAK_MAX_SECONDS)
+                print(f"  -- break after {cycle} cycles, "
+                      f"pausing {pause:.1f}s --")
+                _sleep_with_check(pause, stopper)
+                cycle = 0
+                cycles_until_break = random.randint(BREAK_AFTER_MIN_CYCLES,
+                                                    BREAK_AFTER_MAX_CYCLES)
+            else:
+                _sleep_with_check(random.uniform(MIN_DELAY, MAX_DELAY), stopper)
         print(f"'{STOP_HOLD_KEY}' held for "
               f"{STOP_HOLD_SECONDS}s — stopping.")
     except pyautogui.FailSafeException:
