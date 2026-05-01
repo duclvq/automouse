@@ -409,3 +409,59 @@ def test_save_answers_db_atomic_no_partial_file(tmp_path: Path):
     save_answers_db(path, [{"question": "q", "answer": "a"}])
     assert not (tmp_path / "answers.json.tmp").exists()
     assert path.exists()
+
+
+from automouse import (
+    save_answer_anchor,
+    load_answer_anchor,
+    find_answer_after_anchor,
+)
+
+
+def test_save_load_answer_anchor_roundtrip(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"roi": [1, 2, 3, 4]}))
+    save_answer_anchor(config, "Câu trả lời chính xác là")
+    assert load_answer_anchor(config) == "Câu trả lời chính xác là"
+    data = json.loads(config.read_text())
+    assert data["roi"] == [1, 2, 3, 4]
+
+
+def test_load_answer_anchor_missing_returns_none(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"roi": [1, 2, 3, 4]}))
+    assert load_answer_anchor(config) is None
+
+
+def test_find_answer_after_anchor_picks_next_line():
+    obs = [
+        ("Question text here", (10, 10, 200, 20)),
+        ("Câu trả lời chính xác là:", (10, 50, 220, 20)),
+        ("2-Biển 2.", (10, 80, 100, 20)),
+        ("Phản hồi:", (10, 120, 80, 20)),
+    ]
+    assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") == "2-Biển 2."
+
+
+def test_find_answer_after_anchor_substring_match():
+    obs = [
+        ("Câu trả lời chính xác là: 2-Biển 2", (10, 50, 280, 20)),
+        ("More info", (10, 80, 100, 20)),
+    ]
+    assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") == "More info"
+
+
+def test_find_answer_after_anchor_returns_none_when_anchor_missing():
+    obs = [
+        ("Some text", (10, 10, 100, 20)),
+        ("Other text", (10, 40, 100, 20)),
+    ]
+    assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") is None
+
+
+def test_find_answer_after_anchor_no_text_below_returns_none():
+    obs = [
+        ("Other text above", (10, 5, 100, 20)),
+        ("Câu trả lời chính xác là:", (10, 50, 220, 20)),
+    ]
+    assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") is None

@@ -59,6 +59,8 @@ BREAK_MAX_SECONDS = 10.0
 BLUE_COLOR_TOLERANCE = 25
 QUESTION_MATCH_THRESHOLD = 0.9
 ANSWER_MATCH_THRESHOLD = 0.9
+ANSWER_ANCHOR_DEFAULT = "Câu trả lời chính xác là"
+ANCHOR_MATCH_THRESHOLD = 0.85
 
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 BBox = Tuple[int, int, int, int]  # (x, y, w, h) in pixels, top-left origin
@@ -265,6 +267,68 @@ def load_blue_rgb(config_path: Path) -> Optional[Tuple[int, int, int]]:
     return (int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
 
+def save_answer_anchor(config_path: Path, anchor: str) -> None:
+    """Set "answer_anchor" in config.json, preserving other keys."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if config_path.exists():
+        data = json.loads(config_path.read_text())
+    else:
+        data = {}
+    data["answer_anchor"] = anchor
+    tmp = config_path.with_suffix(config_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False))
+    tmp.replace(config_path)
+
+
+def load_answer_anchor(config_path: Path) -> Optional[str]:
+    """Return saved answer_anchor string, or None if missing."""
+    if not config_path.exists():
+        return None
+    data = json.loads(config_path.read_text())
+    return data.get("answer_anchor")
+
+
+def find_answer_after_anchor(
+    observations: List[Tuple[str, BBox]],
+    anchor: str,
+    threshold: float = ANCHOR_MATCH_THRESHOLD,
+) -> Optional[str]:
+    """Find the OCR observation whose text matches `anchor` (case-insensitive,
+    fuzzy via SequenceMatcher >= threshold). Return the text of the
+    observation directly below the anchor (smallest positive Y delta)."""
+    anchor_norm = anchor.strip().lower()
+    if not anchor_norm:
+        return None
+    anchor_box = None
+    anchor_ratio = threshold
+    for text, box in observations:
+        t = text.strip().lower()
+        if anchor_norm in t:
+            anchor_box = box
+            break
+        ratio = SequenceMatcher(None, t, anchor_norm).ratio()
+        if ratio >= anchor_ratio:
+            anchor_box = box
+            anchor_ratio = ratio
+    if anchor_box is None:
+        return None
+    ax, ay, aw, ah = anchor_box
+    anchor_bottom = ay + ah
+    best_text = None
+    best_dy = None
+    for text, (x, y, w, h) in observations:
+        if (x, y, w, h) == anchor_box:
+            continue
+        # 'Below' = top-edge of this box at or below the anchor's bottom,
+        # with a small slack for OCR jitter.
+        if y >= anchor_bottom - max(2, ah // 4):
+            dy = y - anchor_bottom
+            if best_dy is None or dy < best_dy:
+                best_text = text.strip()
+                best_dy = dy
+    return best_text or None
+
+
 def save_answers_db(path: Path, db: List[Dict[str, str]]) -> None:
     """Atomically write the answer database as JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -370,24 +434,19 @@ def try_click_known_answer(
 
 def observe_after_click(
     roi: ROI,
-    blue_rgb: Tuple[int, int, int],
+    anchor: str,
     question: str,
     answers_db: List[Dict[str, str]],
 ) -> None:
-    """Re-screenshot, find the blue indicator region, OCR the row,
-    append (question, answer) to the in-memory db and write to disk."""
+    """Re-screenshot, OCR, find the line below the anchor phrase, append
+    (question, answer) to answers_db and persist."""
     if not question:
         return
     shot = pyautogui.screenshot(region=roi)
-    mask = color_mask(shot, blue_rgb, BLUE_COLOR_TOLERANCE)
-    region = largest_connected_region(mask)
-    if region is None:
-        print("  [memory] no blue region found; skipping store")
-        return
     obs = ocr_image(shot)
-    answer = text_in_region(obs, region).strip()
+    answer = find_answer_after_anchor(obs, anchor)
     if not answer:
-        print("  [memory] blue region had no overlapping text; "
+        print(f"  [memory] anchor {anchor!r} not found or no text below; "
               "skipping store")
         return
     for entry in answers_db:
@@ -410,8 +469,8 @@ class App:
                   command=self.on_set_roi).pack(pady=4)
         tk.Button(root, text="Capture circle template", width=32,
                   command=self.on_capture_circle).pack(pady=4)
-        tk.Button(root, text="Capture blue line sample", width=32,
-                  command=self.on_capture_blue).pack(pady=4)
+        tk.Button(root, text="Set answer anchor phrase", width=32,
+                  command=self.on_set_anchor).pack(pady=4)
 
         tk.Label(root, text="Rectangle templates:",
                  anchor="w").pack(fill="x", padx=8, pady=(8, 0))
@@ -458,15 +517,21 @@ class App:
         screenshot.crop((x, y, x + w, y + h)).save(CIRCLE_PATH)
         self.refresh_status()
 
-    def on_capture_blue(self) -> None:
-        result = _capture_rectangle(self.root)
-        if result is None:
+    def on_set_anchor(self) -> None:
+        from tkinter import simpledialog
+        current = load_answer_anchor(CONFIG_PATH) or ANSWER_ANCHOR_DEFAULT
+        new = simpledialog.askstring(
+            "Answer anchor phrase",
+            "OCR phrase that precedes the correct answer\n"
+            "(e.g. 'Câu trả lời chính xác là'):",
+            initialvalue=current,
+            parent=self.root)
+        if new is None:
             return
-        screenshot, (x, y, w, h) = result
-        crop = screenshot.crop((x, y, x + w, y + h))
-        BLUE_SAMPLE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        crop.save(BLUE_SAMPLE_PATH)
-        save_blue_rgb(CONFIG_PATH, dominant_color(crop))
+        new = new.strip()
+        if not new:
+            return
+        save_answer_anchor(CONFIG_PATH, new)
         self.refresh_status()
 
     def on_add_rectangle(self) -> None:
@@ -560,9 +625,8 @@ class App:
 
         def mark(p: Path) -> str:
             return "OK" if p.exists() else "missing"
-        blue = load_blue_rgb(CONFIG_PATH)
-        blue_str = (f"OK ({blue[0]}, {blue[1]}, {blue[2]})"
-                    if blue is not None else "not set")
+        anchor = load_answer_anchor(CONFIG_PATH)
+        anchor_str = (f"'{anchor}'" if anchor else "not set")
 
         try:
             mem_count = len(load_answers_db(ANSWERS_PATH))
@@ -572,7 +636,7 @@ class App:
             f"ROI:        {mark(CONFIG_PATH)}\n"
             f"Circle:     {mark(CIRCLE_PATH)}\n"
             f"Rectangles: {len(rect_paths)}\n"
-            f"Blue color: {blue_str}\n"
+            f"Anchor:     {anchor_str}\n"
             f"Memory:     {mem_count} learned question"
             f"{'s' if mem_count != 1 else ''}"
         ))
@@ -790,10 +854,12 @@ def run_detection_loop(
         print("All rectangle templates failed to load.")
         return
 
-    blue_rgb = load_blue_rgb(CONFIG_PATH)
+    anchor = load_answer_anchor(CONFIG_PATH)
     answers_db = load_answers_db(ANSWERS_PATH)
-    if blue_rgb is None:
-        print("  [memory] blue_rgb not set; question/answer feature off")
+    if anchor is None:
+        print("  [memory] no answer_anchor set; question/answer feature off")
+    else:
+        print(f"  [memory] using anchor phrase: {anchor!r}")
     if on_memory_change is not None:
         on_memory_change(len(answers_db))
 
@@ -835,7 +901,7 @@ def run_detection_loop(
             answer_clicked = False
             ocr_obs: List[Tuple[str, BBox]] = []
             question = ""
-            if blue_rgb is not None:
+            if anchor is not None:
                 ocr_obs = ocr_image(shot)
                 question = normalize_ocr_text(ocr_obs)
                 answer_clicked = try_click_known_answer(
@@ -845,9 +911,9 @@ def run_detection_loop(
                 print(f"  circles:    {len(circle_matches)} match(es), "
                       f"clicking {len(picked_circle)}")
                 _click_all(picked_circle, circle_tpl.shape, roi, stopper)
-                if blue_rgb is not None and question:
+                if anchor is not None and question:
                     before = len(answers_db)
-                    observe_after_click(roi, blue_rgb, question, answers_db)
+                    observe_after_click(roi, anchor, question, answers_db)
                     if on_memory_change is not None and len(answers_db) != before:
                         on_memory_change(len(answers_db))
 
