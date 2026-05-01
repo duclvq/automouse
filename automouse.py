@@ -24,6 +24,8 @@ TEMPLATES_DIR = Path("templates")
 CONFIG_PATH = TEMPLATES_DIR / "config.json"
 CIRCLE_PATH = TEMPLATES_DIR / "circle.png"
 RECTANGLES_DIR = TEMPLATES_DIR / "rectangles"
+ANSWERS_PATH = TEMPLATES_DIR / "answers.json"
+BLUE_SAMPLE_PATH = TEMPLATES_DIR / "blue_sample.png"
 
 MATCH_THRESHOLD = 0.8
 MIN_DELAY = 0.17
@@ -47,7 +49,13 @@ BREAK_AFTER_MAX_CYCLES = 30
 BREAK_MIN_SECONDS = 5.0
 BREAK_MAX_SECONDS = 10.0
 
+# Question/answer memory feature.
+BLUE_COLOR_TOLERANCE = 25
+QUESTION_MATCH_THRESHOLD = 0.9
+ANSWER_MATCH_THRESHOLD = 0.9
+
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
+BBox = Tuple[int, int, int, int]  # (x, y, w, h) in pixels, top-left origin
 
 
 def save_roi(config_path: Path, roi: ROI) -> None:
