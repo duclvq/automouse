@@ -227,6 +227,14 @@ def text_in_region(observations: List[Tuple[str, BBox]],
     return " ".join(t for _, t in overlapping)
 
 
+def dominant_color(image: Image.Image) -> Tuple[int, int, int]:
+    """Return the median (R, G, B) of all pixels."""
+    arr = np.asarray(image.convert("RGB"))
+    flat = arr.reshape(-1, 3)
+    r, g, b = np.median(flat, axis=0).astype(int).tolist()
+    return (int(r), int(g), int(b))
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)

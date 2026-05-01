@@ -331,3 +331,22 @@ def test_text_in_region_partial_vertical_overlap_kept():
 
 def test_text_in_region_no_observations():
     assert text_in_region([], (0, 0, 10, 10)) == ""
+
+
+from automouse import dominant_color
+
+
+def test_dominant_color_uniform():
+    img = _Image.new("RGB", (5, 5), (10, 20, 30))
+    assert dominant_color(img) == (10, 20, 30)
+
+
+def test_dominant_color_returns_median_of_pixels():
+    # 3 pixels at (0,0,255), 2 at (0,0,0); median per channel: (0, 0, 255)
+    img = _Image.new("RGB", (5, 1))
+    img.putpixel((0, 0), (0, 0, 255))
+    img.putpixel((1, 0), (0, 0, 255))
+    img.putpixel((2, 0), (0, 0, 255))
+    img.putpixel((3, 0), (0, 0, 0))
+    img.putpixel((4, 0), (0, 0, 0))
+    assert dominant_color(img) == (0, 0, 255)
