@@ -149,3 +149,32 @@ def test_migrate_legacy_rectangle_noop_if_legacy_missing(tmp_path: Path):
     migrate_legacy_rectangle(tmp_path)
     assert not (tmp_path / "rectangle.png").exists()
     assert not (tmp_path / "rectangles").exists()
+
+
+from automouse import normalize_ocr_text
+
+
+def test_normalize_ocr_text_sorts_and_lowercases():
+    obs = [("Banana", (0, 0, 10, 10)),
+           ("apple", (0, 0, 10, 10)),
+           ("CHERRY", (0, 0, 10, 10))]
+    assert normalize_ocr_text(obs) == "apple\nbanana\ncherry"
+
+
+def test_normalize_ocr_text_drops_blanks_and_whitespace():
+    obs = [("  apple  ", (0, 0, 10, 10)),
+           ("", (0, 0, 10, 10)),
+           ("   ", (0, 0, 10, 10)),
+           ("banana", (0, 0, 10, 10))]
+    assert normalize_ocr_text(obs) == "apple\nbanana"
+
+
+def test_normalize_ocr_text_dedupes_lines():
+    obs = [("apple", (0, 0, 10, 10)),
+           ("APPLE", (0, 0, 10, 10)),
+           ("banana", (0, 0, 10, 10))]
+    assert normalize_ocr_text(obs) == "apple\nbanana"
+
+
+def test_normalize_ocr_text_empty():
+    assert normalize_ocr_text([]) == ""

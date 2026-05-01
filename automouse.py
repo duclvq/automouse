@@ -136,6 +136,15 @@ def migrate_legacy_rectangle(templates_dir: Path) -> None:
     legacy.rename(new_dir / "001.png")
 
 
+def normalize_ocr_text(observations: List[Tuple[str, BBox]]) -> str:
+    """Lowercase, strip, drop blanks, dedupe, sort, join with newlines.
+    Order-independent so shuffled answers don't change the signature."""
+    lines = sorted({t.strip().lower()
+                    for t, _ in observations
+                    if t.strip()})
+    return "\n".join(lines)
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)
