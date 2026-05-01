@@ -163,6 +163,15 @@ def find_question_match(
     return best
 
 
+def color_mask(image: Image.Image, target_rgb: Tuple[int, int, int],
+               tolerance: int = BLUE_COLOR_TOLERANCE) -> np.ndarray:
+    """Return an HxW bool mask of pixels within `tolerance` per channel
+    of target_rgb."""
+    arr = np.asarray(image.convert("RGB"))
+    diff = np.abs(arr.astype(int) - np.asarray(target_rgb, dtype=int))
+    return np.all(diff <= tolerance, axis=-1)
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)

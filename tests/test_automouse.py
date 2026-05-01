@@ -208,3 +208,36 @@ def test_find_question_match_picks_best_above_threshold():
 
 def test_find_question_match_empty_db_returns_none():
     assert find_question_match("anything", [], threshold=0.9) is None
+
+
+from PIL import Image as _Image
+from automouse import color_mask
+
+
+def test_color_mask_uniform_target():
+    img = _Image.new("RGB", (5, 5), (0, 128, 255))
+    mask = color_mask(img, (0, 128, 255), tolerance=0)
+    assert mask.shape == (5, 5)
+    assert mask.all()
+
+
+def test_color_mask_within_tolerance():
+    img = _Image.new("RGB", (3, 3), (10, 138, 255))  # off by 10 / 10 / 0
+    mask = color_mask(img, (0, 128, 255), tolerance=25)
+    assert mask.all()
+
+
+def test_color_mask_outside_tolerance():
+    img = _Image.new("RGB", (3, 3), (50, 200, 200))
+    mask = color_mask(img, (0, 128, 255), tolerance=25)
+    assert not mask.any()
+
+
+def test_color_mask_mixed():
+    img = _Image.new("RGB", (4, 1))
+    img.putpixel((0, 0), (0, 128, 255))     # exact
+    img.putpixel((1, 0), (10, 138, 245))    # within tol
+    img.putpixel((2, 0), (200, 50, 0))      # outside
+    img.putpixel((3, 0), (0, 128, 255))     # exact
+    mask = color_mask(img, (0, 128, 255), tolerance=25)
+    assert mask.tolist() == [[True, True, False, True]]
