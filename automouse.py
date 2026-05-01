@@ -1016,8 +1016,19 @@ def run_detection_loop(
             if stopper.check():
                 break
 
+            # The screen state may have changed (answer revealed, page
+            # advanced); re-screenshot for accurate rectangle matching.
+            try:
+                shot2 = pyautogui.screenshot(region=roi)
+                rect_haystack = cv2.cvtColor(np.array(shot2),
+                                             cv2.COLOR_RGB2GRAY)
+            except Exception as e:
+                _emit(f"[loop] post-answer screenshot failed: {e}; "
+                      f"using stale haystack", on_log)
+                rect_haystack = haystack
+
             for name, tpl in rectangle_templates:
-                matches = find_matches(haystack, tpl, MATCH_THRESHOLD)
+                matches = find_matches(rect_haystack, tpl, MATCH_THRESHOLD)
                 print(f"  {name}: {len(matches)} match(es)")
                 _click_all(matches, tpl.shape, roi, stopper)
                 if stopper.check():
