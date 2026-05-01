@@ -52,3 +52,30 @@ def test_nms_keeps_both_when_far_apart():
 
 def test_nms_empty_input():
     assert non_max_suppression([], [], min_distance=10) == []
+
+
+import numpy as np
+
+from automouse import find_matches
+
+
+def test_find_matches_finds_template_in_synthetic_image():
+    # TM_CCOEFF_NORMED needs variance in the template; a structured cross pattern
+    # gives a sharp correlation peak at the true match locations.
+    template = np.zeros((30, 30), dtype=np.uint8)
+    template[10:20, :] = 255  # horizontal bar
+    template[:, 10:20] = 255  # vertical bar
+
+    haystack = np.zeros((200, 200), dtype=np.uint8)
+    haystack[50:80, 50:80] = template       # top-left at (x=50, y=50)
+    haystack[100:130, 140:170] = template   # top-left at (x=140, y=100)
+
+    matches = find_matches(haystack, template, threshold=0.9)
+
+    assert sorted(matches) == [(50, 50), (140, 100)]
+
+
+def test_find_matches_returns_empty_when_no_match():
+    haystack = np.zeros((100, 100), dtype=np.uint8)
+    template = np.full((20, 20), 255, dtype=np.uint8)
+    assert find_matches(haystack, template, threshold=0.95) == []
