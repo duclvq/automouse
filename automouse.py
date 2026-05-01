@@ -519,8 +519,31 @@ class App:
                     f"larger ROI.")
                 return
 
-        self.root.destroy()
-        run_detection_loop()
+        self.root.withdraw()
+        stopper = _HoldToStop()
+        stop_win = tk.Toplevel(self.root)
+        stop_win.title("Automouse — running")
+        stop_win.geometry("260x110")
+        stop_win.attributes("-topmost", True)
+        tk.Label(stop_win,
+                 text="Click loop is running.\n"
+                      "Click Stop, hold 's' for 2s,\n"
+                      "or move mouse to a screen corner.",
+                 justify="center").pack(pady=8)
+        tk.Button(stop_win, text="Stop", width=20,
+                  command=lambda: setattr(stopper, "stop", True)).pack()
+
+        try:
+            run_detection_loop(stopper=stopper, tk_root=self.root)
+        finally:
+            try:
+                stop_win.destroy()
+            except tk.TclError:
+                pass
+            try:
+                self.root.destroy()
+            except tk.TclError:
+                pass
 
     def refresh_status(self) -> None:
         rect_paths = list_rectangle_templates(RECTANGLES_DIR)
@@ -637,10 +660,18 @@ class _HoldToStop:
         return self.stop
 
 
-def _sleep_with_check(seconds: float, stopper: _HoldToStop) -> None:
-    """Like time.sleep, but polls the stopper every STOP_POLL_INTERVAL."""
+def _sleep_with_check(seconds: float, stopper: _HoldToStop,
+                      tk_root: Optional[tk.Misc] = None) -> None:
+    """Like time.sleep, but polls the stopper every STOP_POLL_INTERVAL.
+    If tk_root is given, also pumps Tk events so a Stop button stays
+    responsive."""
     deadline = time.monotonic() + seconds
     while True:
+        if tk_root is not None:
+            try:
+                tk_root.update()
+            except tk.TclError:
+                tk_root = None  # window destroyed; stop pumping
         remaining = deadline - time.monotonic()
         if remaining <= 0 or stopper.check():
             return
@@ -710,7 +741,10 @@ def _click_all(matches: List[Tuple[int, int]],
             time.sleep(delay)
 
 
-def run_detection_loop() -> None:
+def run_detection_loop(
+    stopper: Optional[_HoldToStop] = None,
+    tk_root: Optional[tk.Misc] = None,
+) -> None:
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0  # we manage our own per-step delays
 
@@ -756,12 +790,14 @@ def run_detection_loop() -> None:
                   f"({rw}x{rh}).")
             return
 
-    stopper = _HoldToStop()
+    if stopper is None:
+        stopper = _HoldToStop()
 
     print(f"Running detection loop. ROI={roi}. "
           f"{len(rectangle_templates)} rectangle template(s). "
           f"Stop with: Ctrl+C, hold '{STOP_HOLD_KEY}' for "
-          f"{STOP_HOLD_SECONDS}s, or move mouse to a screen corner.")
+          f"{STOP_HOLD_SECONDS}s, or move mouse to a screen corner"
+          f"{' (or click Stop in the GUI)' if tk_root is not None else ''}.")
 
     cycle = 0
     cycles_until_break = random.randint(BREAK_AFTER_MIN_CYCLES,
@@ -769,6 +805,11 @@ def run_detection_loop() -> None:
 
     try:
         while not stopper.check():
+            if tk_root is not None:
+                try:
+                    tk_root.update()
+                except tk.TclError:
+                    tk_root = None
             shot = pyautogui.screenshot(region=roi)
             haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
 
@@ -809,12 +850,13 @@ def run_detection_loop() -> None:
                 pause = random.uniform(BREAK_MIN_SECONDS, BREAK_MAX_SECONDS)
                 print(f"  -- break after {cycle} cycles, "
                       f"pausing {pause:.1f}s --")
-                _sleep_with_check(pause, stopper)
+                _sleep_with_check(pause, stopper, tk_root)
                 cycle = 0
                 cycles_until_break = random.randint(BREAK_AFTER_MIN_CYCLES,
                                                     BREAK_AFTER_MAX_CYCLES)
             else:
-                _sleep_with_check(random.uniform(MIN_DELAY, MAX_DELAY), stopper)
+                _sleep_with_check(random.uniform(MIN_DELAY, MAX_DELAY),
+                                  stopper, tk_root)
     except pyautogui.FailSafeException:
         print("Failsafe triggered. Exiting.")
         sys.exit(0)
