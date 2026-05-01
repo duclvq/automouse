@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-import pytest
+import numpy as np
 
-from automouse import load_roi, save_roi
+from automouse import find_matches, load_roi, non_max_suppression, save_roi
 
 
 def test_save_roi_writes_json(tmp_path: Path):
@@ -29,9 +29,6 @@ def test_save_then_load_roundtrip(tmp_path: Path):
     assert load_roi(config) == (1, 2, 3, 4)
 
 
-from automouse import non_max_suppression
-
-
 def test_nms_keeps_highest_score_when_overlapping():
     # Two candidates whose centers are 5px apart, min_distance = 10
     # Expect only the higher-scoring one survives.
@@ -52,11 +49,6 @@ def test_nms_keeps_both_when_far_apart():
 
 def test_nms_empty_input():
     assert non_max_suppression([], [], min_distance=10) == []
-
-
-import numpy as np
-
-from automouse import find_matches
 
 
 def test_find_matches_finds_template_in_synthetic_image():
