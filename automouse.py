@@ -288,14 +288,36 @@ def load_answer_anchor(config_path: Path) -> Optional[str]:
     return data.get("answer_anchor")
 
 
+# Navigation/UI words that should never be stored as an answer. Lowercase.
+_ANSWER_DENYLIST = {
+    "trước", "truoc", "previous", "back",
+    "tiếp", "tiep", "next", "continue",
+    "ok", "cancel", "hủy", "huy",
+    "kết thúc luyện thi", "ket thuc luyen thi",
+    "start", "bắt đầu", "bat dau",
+    "submit", "phản hồi", "phan hoi",
+}
+
+
+def _is_answer_like(text: str) -> bool:
+    """True if `text` plausibly looks like a quiz answer (not a nav button)."""
+    s = text.strip()
+    if len(s) < 3:
+        return False
+    if s.lower() in _ANSWER_DENYLIST:
+        return False
+    return True
+
+
 def find_answer_after_anchor(
     observations: List[Tuple[str, BBox]],
     anchor: str,
     threshold: float = ANCHOR_MATCH_THRESHOLD,
 ) -> Optional[str]:
     """Find the OCR observation whose text matches `anchor` (case-insensitive,
-    fuzzy via SequenceMatcher >= threshold). Return the text of the
-    observation directly below the anchor (smallest positive Y delta)."""
+    fuzzy via SequenceMatcher >= threshold). Return the text of the closest
+    observation directly below the anchor that looks answer-like (excludes
+    navigation buttons via _ANSWER_DENYLIST)."""
     anchor_norm = anchor.strip().lower()
     if not anchor_norm:
         return None
@@ -322,6 +344,8 @@ def find_answer_after_anchor(
         # 'Below' = top-edge of this box at or below the anchor's bottom,
         # with a small slack for OCR jitter.
         if y >= anchor_bottom - max(2, ah // 4):
+            if not _is_answer_like(text):
+                continue  # skip nav buttons / chrome
             dy = y - anchor_bottom
             if best_dy is None or dy < best_dy:
                 best_text = text.strip()

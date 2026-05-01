@@ -465,3 +465,23 @@ def test_find_answer_after_anchor_no_text_below_returns_none():
         ("Câu trả lời chính xác là:", (10, 50, 220, 20)),
     ]
     assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") is None
+
+
+def test_find_answer_after_anchor_skips_nav_buttons():
+    # The closest line below the anchor is 'Trước' (Previous button);
+    # the next-closest is the real answer. Should skip the nav button.
+    obs = [
+        ("Câu trả lời chính xác là:", (10, 50, 220, 20)),
+        ("Trước", (10, 75, 50, 18)),  # nav button — must be skipped
+        ("2-Biển 2.", (10, 110, 100, 20)),
+    ]
+    assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") == "2-Biển 2."
+
+
+def test_find_answer_after_anchor_skips_short_text():
+    obs = [
+        ("Câu trả lời chính xác là:", (10, 50, 220, 20)),
+        ("ok", (10, 75, 30, 18)),  # too short / nav-like
+        ("Real answer here.", (10, 110, 200, 20)),
+    ]
+    assert find_answer_after_anchor(obs, "Câu trả lời chính xác là") == "Real answer here."
