@@ -395,12 +395,23 @@ def ocr_image(image: Image.Image) -> List[Tuple[str, BBox]]:
     return out
 
 
+def _emit(message: str, on_log: Optional[callable] = None) -> None:
+    """Print to stdout and (optionally) push to a GUI log callback."""
+    print(f"  {message}")
+    if on_log is not None:
+        try:
+            on_log(message)
+        except Exception:
+            pass
+
+
 def try_click_known_answer(
     shot: Image.Image,
     ocr_obs: List[Tuple[str, BBox]],
     answers_db: List[Dict[str, str]],
     roi: ROI,
     stopper: Optional["_HoldToStop"] = None,
+    on_log: Optional[callable] = None,
 ) -> bool:
     """If OCR'd question matches a stored entry and the answer text is
     visible, click its center and return True. Else return False."""
@@ -414,14 +425,14 @@ def try_click_known_answer(
         return False
     ans_box = find_text_box(ocr_obs, match["answer"])
     if ans_box is None:
-        print(f"  [memory] question matched but answer "
-              f"{match['answer']!r} not visible; falling back")
+        _emit(f"[memory] match but answer {match['answer']!r} "
+              f"not visible; falling back", on_log)
         return False
     rx, ry, _, _ = roi
     x, y, w, h = ans_box
     cx = rx + x + w // 2
     cy = ry + y + h // 2
-    print(f"  [memory] clicking known answer {match['answer']!r}")
+    _emit(f"[memory] recognized → clicking {match['answer']!r}", on_log)
     _human_move_to(cx, cy)
     pyautogui.click()
     delay = random.uniform(MIN_DELAY, MAX_DELAY)
@@ -437,6 +448,7 @@ def observe_after_click(
     anchor: str,
     question: str,
     answers_db: List[Dict[str, str]],
+    on_log: Optional[callable] = None,
 ) -> None:
     """Re-screenshot, OCR, find the line below the anchor phrase, append
     (question, answer) to answers_db and persist."""
@@ -446,15 +458,15 @@ def observe_after_click(
     obs = ocr_image(shot)
     answer = find_answer_after_anchor(obs, anchor)
     if not answer:
-        print(f"  [memory] anchor {anchor!r} not found or no text below; "
-              "skipping store")
+        _emit(f"[memory] anchor not visible; skipping store", on_log)
         return
     for entry in answers_db:
         if entry["question"] == question and entry["answer"] == answer:
-            return  # already stored
+            _emit(f"[memory] dup, already learned: {answer!r}", on_log)
+            return
     answers_db.append({"question": question, "answer": answer})
     save_answers_db(ANSWERS_PATH, answers_db)
-    print(f"  [memory] stored answer {answer!r} for question")
+    _emit(f"[memory] LEARNED: {answer!r}", on_log)
 
 
 class App:
@@ -588,24 +600,45 @@ class App:
         stopper = _HoldToStop()
         stop_win = tk.Toplevel(self.root)
         stop_win.title("Automouse — running")
-        stop_win.geometry("280x140")
+        stop_win.geometry("520x420")
         stop_win.attributes("-topmost", True)
         tk.Label(stop_win,
-                 text="Click loop is running.\n"
-                      "Click Stop, hold 's' for 2s,\n"
-                      "or move mouse to a screen corner.",
+                 text="Click loop is running. "
+                      "Stop button / hold 's' 2s / corner failsafe.",
                  justify="center").pack(pady=4)
         mem_var = tk.StringVar(value="Memory: 0 learned questions")
         tk.Label(stop_win, textvariable=mem_var).pack(pady=2)
         tk.Button(stop_win, text="Stop", width=20,
                   command=lambda: setattr(stopper, "stop", True)).pack(pady=4)
 
+        log_frame = tk.Frame(stop_win)
+        log_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        log_scroll = tk.Scrollbar(log_frame, orient="vertical")
+        log_text = tk.Text(log_frame, height=15, wrap="word",
+                           yscrollcommand=log_scroll.set,
+                           font=("Menlo", 11))
+        log_scroll.config(command=log_text.yview)
+        log_scroll.pack(side="right", fill="y")
+        log_text.pack(side="left", fill="both", expand=True)
+        log_text.configure(state="disabled")
+
         def on_memory_change(n: int) -> None:
             mem_var.set(f"Memory: {n} learned question{'s' if n != 1 else ''}")
 
+        def on_log(message: str) -> None:
+            log_text.configure(state="normal")
+            log_text.insert("end", message + "\n")
+            # Cap at ~500 lines so it doesn't grow unbounded.
+            line_count = int(log_text.index("end-1c").split(".")[0])
+            if line_count > 500:
+                log_text.delete("1.0", f"{line_count - 500}.0")
+            log_text.see("end")
+            log_text.configure(state="disabled")
+
         try:
             run_detection_loop(stopper=stopper, tk_root=self.root,
-                               on_memory_change=on_memory_change)
+                               on_memory_change=on_memory_change,
+                               on_log=on_log)
         finally:
             try:
                 stop_win.destroy()
@@ -823,6 +856,7 @@ def run_detection_loop(
     stopper: Optional[_HoldToStop] = None,
     tk_root: Optional[tk.Misc] = None,
     on_memory_change: Optional[callable] = None,
+    on_log: Optional[callable] = None,
 ) -> None:
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0  # we manage our own per-step delays
@@ -900,7 +934,7 @@ def run_detection_loop(
             ocr_obs = ocr_image(shot)
             question = normalize_ocr_text(ocr_obs)
             answer_clicked = try_click_known_answer(
-                shot, ocr_obs, answers_db, roi, stopper)
+                shot, ocr_obs, answers_db, roi, stopper, on_log=on_log)
 
             if not answer_clicked:
                 print(f"  circles:    {len(circle_matches)} match(es), "
@@ -908,7 +942,8 @@ def run_detection_loop(
                 _click_all(picked_circle, circle_tpl.shape, roi, stopper)
                 if question:
                     before = len(answers_db)
-                    observe_after_click(roi, anchor, question, answers_db)
+                    observe_after_click(roi, anchor, question, answers_db,
+                                        on_log=on_log)
                     if on_memory_change is not None and len(answers_db) != before:
                         on_memory_change(len(answers_db))
 
