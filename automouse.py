@@ -130,22 +130,42 @@ def migrate_legacy_rectangle(templates_dir: Path) -> None:
 
 class App:
     def __init__(self, root: tk.Tk) -> None:
+        migrate_legacy_rectangle(TEMPLATES_DIR)
+
         self.root = root
         root.title("Automouse")
-        root.geometry("280x220")
+        root.geometry("320x420")
 
-        tk.Button(root, text="Set ROI", width=28,
+        tk.Button(root, text="Set ROI", width=32,
                   command=self.on_set_roi).pack(pady=4)
-        tk.Button(root, text="Capture circle template", width=28,
+        tk.Button(root, text="Capture circle template", width=32,
                   command=self.on_capture_circle).pack(pady=4)
-        tk.Button(root, text="Capture rectangle template", width=28,
-                  command=self.on_capture_rectangle).pack(pady=4)
-        self.run_btn = tk.Button(root, text="Run", width=28,
+
+        tk.Label(root, text="Rectangle templates:",
+                 anchor="w").pack(fill="x", padx=8, pady=(8, 0))
+
+        list_frame = tk.Frame(root)
+        list_frame.pack(fill="both", expand=False, padx=8)
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical")
+        self.rect_list = tk.Listbox(list_frame, height=6,
+                                    yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.rect_list.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.rect_list.pack(side="left", fill="both", expand=True)
+
+        btn_row = tk.Frame(root)
+        btn_row.pack(pady=4)
+        tk.Button(btn_row, text="+ Add rectangle",
+                  command=self.on_add_rectangle).pack(side="left", padx=2)
+        tk.Button(btn_row, text="Delete selected",
+                  command=self.on_delete_rectangle).pack(side="left", padx=2)
+
+        self.run_btn = tk.Button(root, text="Run", width=32,
                                  command=self.on_run)
-        self.run_btn.pack(pady=4)
+        self.run_btn.pack(pady=8)
 
         self.status = tk.Label(root, text="", justify="left")
-        self.status.pack(pady=8)
+        self.status.pack(pady=4)
 
         self.refresh_status()
 
@@ -158,31 +178,51 @@ class App:
         self.refresh_status()
 
     def on_capture_circle(self) -> None:
-        self._capture_template_to(CIRCLE_PATH)
-
-    def on_capture_rectangle(self) -> None:
-        self._capture_template_to(RECTANGLE_PATH)
-
-    def _capture_template_to(self, path: Path) -> None:
         result = _capture_rectangle(self.root)
         if result is None:
             return
         screenshot, (x, y, w, h) = result
-        path.parent.mkdir(parents=True, exist_ok=True)
+        CIRCLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        screenshot.crop((x, y, x + w, y + h)).save(CIRCLE_PATH)
+        self.refresh_status()
+
+    def on_add_rectangle(self) -> None:
+        result = _capture_rectangle(self.root)
+        if result is None:
+            return
+        screenshot, (x, y, w, h) = result
+        RECTANGLES_DIR.mkdir(parents=True, exist_ok=True)
+        n = next_rectangle_number(RECTANGLES_DIR)
+        path = RECTANGLES_DIR / f"{n:03d}.png"
         screenshot.crop((x, y, x + w, y + h)).save(path)
         self.refresh_status()
 
+    def on_delete_rectangle(self) -> None:
+        sel = self.rect_list.curselection()
+        if not sel:
+            return
+        name = self.rect_list.get(sel[0])
+        path = RECTANGLES_DIR / name
+        if path.exists():
+            path.unlink()
+        self.refresh_status()
+
     def on_run(self) -> None:
-        # Validate up front; the button is normally disabled when files
-        # are missing, but double-check in case state drifted.
-        if not (CONFIG_PATH.exists() and CIRCLE_PATH.exists()
-                and RECTANGLE_PATH.exists()):
-            messagebox.showerror("Automouse", "ROI or templates missing.")
+        if not CONFIG_PATH.exists() or not CIRCLE_PATH.exists():
+            messagebox.showerror("Automouse", "ROI or circle template missing.")
+            return
+
+        rect_paths = list_rectangle_templates(RECTANGLES_DIR)
+        if not rect_paths:
+            messagebox.showerror("Automouse",
+                                 "Add at least one rectangle template.")
             return
 
         roi = load_roi(CONFIG_PATH)
         rx, ry, rw, rh = roi
-        for path, name in ((CIRCLE_PATH, "circle"), (RECTANGLE_PATH, "rectangle")):
+
+        for path, name in [(CIRCLE_PATH, "circle")] + [
+                (p, p.name) for p in rect_paths]:
             tpl = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
             if tpl is None:
                 messagebox.showerror("Automouse", f"Could not read {path}.")
@@ -200,17 +240,22 @@ class App:
         run_detection_loop()
 
     def refresh_status(self) -> None:
+        rect_paths = list_rectangle_templates(RECTANGLES_DIR)
+
+        self.rect_list.delete(0, tk.END)
+        for p in rect_paths:
+            self.rect_list.insert(tk.END, p.name)
+
         def mark(p: Path) -> str:
             return "OK" if p.exists() else "missing"
-        text = (
-            f"ROI:       {mark(CONFIG_PATH)}\n"
-            f"Circle:    {mark(CIRCLE_PATH)}\n"
-            f"Rectangle: {mark(RECTANGLE_PATH)}"
-        )
-        self.status.config(text=text)
+        self.status.config(text=(
+            f"ROI:        {mark(CONFIG_PATH)}\n"
+            f"Circle:     {mark(CIRCLE_PATH)}\n"
+            f"Rectangles: {len(rect_paths)}"
+        ))
         all_ready = (CONFIG_PATH.exists()
                      and CIRCLE_PATH.exists()
-                     and RECTANGLE_PATH.exists())
+                     and len(rect_paths) >= 1)
         self.run_btn.config(state=tk.NORMAL if all_ready else tk.DISABLED)
 
 
