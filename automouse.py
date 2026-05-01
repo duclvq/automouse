@@ -66,7 +66,7 @@ ANCHOR_MATCH_THRESHOLD = 0.85
 # When the primary rectangle (e.g. 'Tiếp') goes missing for this many
 # consecutive cycles, run the end-of-batch sequence (kết thúc → OK →
 # luyện tất cả) instead of waiting indefinitely.
-RECT_MISS_THRESHOLD = 3
+RECT_MISS_THRESHOLD = 1
 END_FLOW_STEP_DELAY = 1.2
 
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
