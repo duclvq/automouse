@@ -11,7 +11,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 from PIL import Image
-from pynput import keyboard
+from Quartz import CGEventSourceKeyState, kCGEventSourceStateHIDSystemState
 from tkinter import messagebox
 from typing import List, Optional, Tuple
 
@@ -24,7 +24,9 @@ MATCH_THRESHOLD = 0.8
 MIN_DELAY = 0.5
 MAX_DELAY = 1.0
 STOP_HOLD_KEY = "s"
+STOP_HOLD_KEYCODE = 1  # macOS virtual keycode for 's' (kVK_ANSI_S)
 STOP_HOLD_SECONDS = 2.0
+STOP_POLL_INTERVAL = 0.05
 
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 
@@ -228,35 +230,36 @@ def _pil_to_tk(image: Image.Image):
 
 
 class _HoldToStop:
-    """Sets `stop` to True when STOP_HOLD_KEY is held for STOP_HOLD_SECONDS."""
+    """Polls macOS HID; sets `stop` to True when STOP_HOLD_KEY is held for
+    STOP_HOLD_SECONDS. Must be polled (.check()) from the main thread —
+    pynput-style listener threads crash on recent macOS because TSM APIs
+    require the main thread."""
 
     def __init__(self) -> None:
         self.stop = False
         self._press_started: Optional[float] = None
-        self._listener: Optional[keyboard.Listener] = None
 
-    def start(self) -> None:
-        self._listener = keyboard.Listener(
-            on_press=self._on_press, on_release=self._on_release)
-        self._listener.start()
+    def check(self) -> bool:
+        if CGEventSourceKeyState(kCGEventSourceStateHIDSystemState,
+                                 STOP_HOLD_KEYCODE):
+            now = time.monotonic()
+            if self._press_started is None:
+                self._press_started = now
+            elif now - self._press_started >= STOP_HOLD_SECONDS:
+                self.stop = True
+        else:
+            self._press_started = None
+        return self.stop
 
-    def stop_listener(self) -> None:
-        if self._listener is not None:
-            self._listener.stop()
-            self._listener = None
 
-    def _on_press(self, key) -> None:
-        if getattr(key, "char", None) != STOP_HOLD_KEY:
+def _sleep_with_check(seconds: float, stopper: _HoldToStop) -> None:
+    """Like time.sleep, but polls the stopper every STOP_POLL_INTERVAL."""
+    deadline = time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or stopper.check():
             return
-        if self._press_started is None:
-            self._press_started = time.monotonic()
-        elif time.monotonic() - self._press_started >= STOP_HOLD_SECONDS:
-            self.stop = True
-
-    def _on_release(self, key) -> None:
-        if getattr(key, "char", None) != STOP_HOLD_KEY:
-            return
-        self._press_started = None
+        time.sleep(min(STOP_POLL_INTERVAL, remaining))
 
 
 def _click_all(matches: List[Tuple[int, int]],
@@ -267,12 +270,16 @@ def _click_all(matches: List[Tuple[int, int]],
     th, tw = template_shape[:2]
     rx, ry, _, _ = roi
     for mx, my in matches:
-        if stopper is not None and stopper.stop:
+        if stopper is not None and stopper.check():
             return
         cx = rx + mx + tw // 2
         cy = ry + my + th // 2
         pyautogui.click(cx, cy)
-        time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+        delay = random.uniform(MIN_DELAY, MAX_DELAY)
+        if stopper is not None:
+            _sleep_with_check(delay, stopper)
+        else:
+            time.sleep(delay)
 
 
 def run_detection_loop() -> None:
@@ -297,40 +304,36 @@ def run_detection_loop() -> None:
             return
 
     stopper = _HoldToStop()
-    stopper.start()
 
     print(f"Running detection loop. ROI={roi}. Stop with: Ctrl+C, "
           f"hold '{STOP_HOLD_KEY}' for {STOP_HOLD_SECONDS}s, or move "
           f"mouse to a screen corner.")
 
     try:
-        while not stopper.stop:
+        while not stopper.check():
             shot = pyautogui.screenshot(region=roi)
             haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
 
             circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
             print(f"  circles:    {len(circle_matches)} match(es)")
             _click_all(circle_matches, circle_tpl.shape, roi, stopper)
-            if stopper.stop:
+            if stopper.check():
                 break
 
             rect_matches = find_matches(haystack, rect_tpl, MATCH_THRESHOLD)
             print(f"  rectangles: {len(rect_matches)} match(es)")
             _click_all(rect_matches, rect_tpl.shape, roi, stopper)
-            if stopper.stop:
+            if stopper.check():
                 break
 
-            time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
-        if stopper.stop:
-            print(f"'{STOP_HOLD_KEY}' held for "
-                  f"{STOP_HOLD_SECONDS}s — stopping.")
+            _sleep_with_check(random.uniform(MIN_DELAY, MAX_DELAY), stopper)
+        print(f"'{STOP_HOLD_KEY}' held for "
+              f"{STOP_HOLD_SECONDS}s — stopping.")
     except pyautogui.FailSafeException:
         print("Failsafe triggered. Exiting.")
         sys.exit(0)
     except KeyboardInterrupt:
         print("Stopped by user. Bye.")
-    finally:
-        stopper.stop_listener()
 
 
 def main() -> None:
