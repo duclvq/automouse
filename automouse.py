@@ -11,7 +11,11 @@ import time
 import tkinter as tk
 from pathlib import Path
 from PIL import Image
-from Quartz import CGEventSourceKeyState, kCGEventSourceStateHIDSystemState
+from Quartz import (
+    CGEventSourceKeyState,
+    CGWarpMouseCursorPosition,
+    kCGEventSourceStateHIDSystemState,
+)
 from tkinter import messagebox
 from typing import List, Optional, Tuple
 
@@ -270,6 +274,16 @@ def _sleep_with_check(seconds: float, stopper: _HoldToStop) -> None:
         time.sleep(min(STOP_POLL_INTERVAL, remaining))
 
 
+def _move_cursor(x: float, y: float) -> None:
+    """Visibly move the cursor on macOS. pyautogui.moveTo only posts a
+    kCGEventMouseMoved event — that updates the system's logical mouse
+    position (so clicks land correctly) but doesn't move the visible
+    cursor on modern macOS. CGWarpMouseCursorPosition does. Call both so
+    the cursor is visible AND apps receive a moved event."""
+    CGWarpMouseCursorPosition((x, y))
+    pyautogui.moveTo(x, y, _pause=False)
+
+
 def _human_move_to(x: int, y: int) -> None:
     """Move the cursor to (x, y) along a cubic-Bezier curve with jitter,
     instead of jumping straight to the target. Helps mask automation."""
@@ -277,11 +291,9 @@ def _human_move_to(x: int, y: int) -> None:
     dx, dy = x - sx, y - sy
     distance = math.hypot(dx, dy)
     if distance < 3:
-        pyautogui.moveTo(x, y)
+        _move_cursor(x, y)
         return
 
-    # Two control points offset perpendicular to the straight line by a
-    # random fraction of the total distance, in opposite-sign-friendly ranges.
     perp_x, perp_y = -dy / distance, dx / distance
     o1 = random.uniform(-MOVE_CURVE_STRENGTH, MOVE_CURVE_STRENGTH) * distance
     o2 = random.uniform(-MOVE_CURVE_STRENGTH, MOVE_CURVE_STRENGTH) * distance
@@ -299,9 +311,9 @@ def _human_move_to(x: int, y: int) -> None:
         by = u**3 * sy + 3*u**2*t * cp1y + 3*u*t**2 * cp2y + t**3 * y
         bx += random.gauss(0, MOVE_JITTER_PIXELS)
         by += random.gauss(0, MOVE_JITTER_PIXELS)
-        pyautogui.moveTo(bx, by)
+        _move_cursor(bx, by)
         time.sleep(random.uniform(MOVE_STEP_MIN_DELAY, MOVE_STEP_MAX_DELAY))
-    pyautogui.moveTo(x, y)
+    _move_cursor(x, y)
 
 
 def _click_all(matches: List[Tuple[int, int]],
