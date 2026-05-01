@@ -350,3 +350,62 @@ def test_dominant_color_returns_median_of_pixels():
     img.putpixel((3, 0), (0, 0, 0))
     img.putpixel((4, 0), (0, 0, 0))
     assert dominant_color(img) == (0, 0, 255)
+
+
+from automouse import (
+    save_blue_rgb,
+    load_blue_rgb,
+    save_answers_db,
+    load_answers_db,
+)
+
+
+def test_save_blue_rgb_preserves_other_keys(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"roi": [10, 20, 30, 40]}))
+    save_blue_rgb(config, (0, 128, 255))
+    data = json.loads(config.read_text())
+    assert data == {"roi": [10, 20, 30, 40], "blue_rgb": [0, 128, 255]}
+
+
+def test_save_blue_rgb_creates_file_if_missing(tmp_path: Path):
+    config = tmp_path / "config.json"
+    save_blue_rgb(config, (1, 2, 3))
+    assert json.loads(config.read_text()) == {"blue_rgb": [1, 2, 3]}
+
+
+def test_load_blue_rgb_returns_tuple(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(
+        {"roi": [10, 20, 30, 40], "blue_rgb": [0, 128, 255]}))
+    assert load_blue_rgb(config) == (0, 128, 255)
+
+
+def test_load_blue_rgb_missing_key_returns_none(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"roi": [1, 2, 3, 4]}))
+    assert load_blue_rgb(config) is None
+
+
+def test_load_blue_rgb_missing_file_returns_none(tmp_path: Path):
+    assert load_blue_rgb(tmp_path / "missing.json") is None
+
+
+def test_save_load_answers_db_roundtrip(tmp_path: Path):
+    db = [{"question": "q1", "answer": "a1"},
+          {"question": "q2", "answer": "a2"}]
+    path = tmp_path / "answers.json"
+    save_answers_db(path, db)
+    assert load_answers_db(path) == db
+
+
+def test_load_answers_db_missing_file_returns_empty(tmp_path: Path):
+    assert load_answers_db(tmp_path / "missing.json") == []
+
+
+def test_save_answers_db_atomic_no_partial_file(tmp_path: Path):
+    # After a successful save there should be no .tmp file lingering.
+    path = tmp_path / "answers.json"
+    save_answers_db(path, [{"question": "q", "answer": "a"}])
+    assert not (tmp_path / "answers.json.tmp").exists()
+    assert path.exists()

@@ -235,6 +235,47 @@ def dominant_color(image: Image.Image) -> Tuple[int, int, int]:
     return (int(r), int(g), int(b))
 
 
+def save_blue_rgb(config_path: Path, rgb: Tuple[int, int, int]) -> None:
+    """Set "blue_rgb" in config.json, preserving other keys. Creates
+    parent dirs and the file if missing."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if config_path.exists():
+        data = json.loads(config_path.read_text())
+    else:
+        data = {}
+    data["blue_rgb"] = [int(rgb[0]), int(rgb[1]), int(rgb[2])]
+    tmp = config_path.with_suffix(config_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(config_path)
+
+
+def load_blue_rgb(config_path: Path) -> Optional[Tuple[int, int, int]]:
+    """Return the saved blue_rgb tuple, or None if missing/absent key."""
+    if not config_path.exists():
+        return None
+    data = json.loads(config_path.read_text())
+    rgb = data.get("blue_rgb")
+    if rgb is None:
+        return None
+    return (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+
+def save_answers_db(path: Path, db: List[Dict[str, str]]) -> None:
+    """Atomically write the answer database as JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(db, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def load_answers_db(path: Path) -> List[Dict[str, str]]:
+    """Return the answer database, or [] if the file does not exist.
+    Raises on JSON parse error so corrupt files surface clearly."""
+    if not path.exists():
+        return []
+    return json.loads(path.read_text())
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)
