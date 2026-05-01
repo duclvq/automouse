@@ -4,8 +4,19 @@ import cv2
 import json
 import math
 import numpy as np
+import tkinter as tk
 from pathlib import Path
+from tkinter import messagebox
 from typing import List, Optional, Tuple
+
+TEMPLATES_DIR = Path("templates")
+CONFIG_PATH = TEMPLATES_DIR / "config.json"
+CIRCLE_PATH = TEMPLATES_DIR / "circle.png"
+RECTANGLE_PATH = TEMPLATES_DIR / "rectangle.png"
+
+MATCH_THRESHOLD = 0.8
+MIN_DELAY = 0.5
+MAX_DELAY = 1.0
 
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 
@@ -53,3 +64,62 @@ def find_matches(
     th, tw = template.shape[:2]
     min_distance = min(tw, th) / 2
     return non_max_suppression(points, scores, min_distance)
+
+
+class App:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        root.title("Automouse")
+        root.geometry("280x220")
+
+        tk.Button(root, text="Set ROI", width=28,
+                  command=self.on_set_roi).pack(pady=4)
+        tk.Button(root, text="Capture circle template", width=28,
+                  command=self.on_capture_circle).pack(pady=4)
+        tk.Button(root, text="Capture rectangle template", width=28,
+                  command=self.on_capture_rectangle).pack(pady=4)
+        self.run_btn = tk.Button(root, text="Run", width=28,
+                                 command=self.on_run)
+        self.run_btn.pack(pady=4)
+
+        self.status = tk.Label(root, text="", justify="left")
+        self.status.pack(pady=8)
+
+        self.refresh_status()
+
+    # Stubs — filled in by later tasks.
+    def on_set_roi(self) -> None:
+        messagebox.showinfo("Automouse", "Set ROI not implemented yet")
+
+    def on_capture_circle(self) -> None:
+        messagebox.showinfo("Automouse", "Capture circle not implemented yet")
+
+    def on_capture_rectangle(self) -> None:
+        messagebox.showinfo("Automouse", "Capture rectangle not implemented yet")
+
+    def on_run(self) -> None:
+        messagebox.showinfo("Automouse", "Run not implemented yet")
+
+    def refresh_status(self) -> None:
+        def mark(p: Path) -> str:
+            return "OK" if p.exists() else "missing"
+        text = (
+            f"ROI:       {mark(CONFIG_PATH)}\n"
+            f"Circle:    {mark(CIRCLE_PATH)}\n"
+            f"Rectangle: {mark(RECTANGLE_PATH)}"
+        )
+        self.status.config(text=text)
+        all_ready = (CONFIG_PATH.exists()
+                     and CIRCLE_PATH.exists()
+                     and RECTANGLE_PATH.exists())
+        self.run_btn.config(state=tk.NORMAL if all_ready else tk.DISABLED)
+
+
+def main() -> None:
+    root = tk.Tk()
+    App(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
