@@ -415,6 +415,15 @@ def extract_question_sentence(observations: List[Tuple[str, BBox]]) -> str:
     return max(candidates, key=len)
 
 
+def question_signature(observations: List[Tuple[str, BBox]]) -> str:
+    """Stable, low-noise identifier for a question. Returns the longest
+    OCR observation containing '?', lowercased and stripped. Used as the
+    key for matching stored (question, answer) pairs across attempts.
+    Returns '' if no question is detected; the loop treats '' as
+    'don't try to recognize and don't store'."""
+    return extract_question_sentence(observations).strip().lower()
+
+
 def _short(s: str, n: int = 80) -> str:
     s = s.strip()
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -432,7 +441,7 @@ def try_click_known_answer(
     visible, click its center and return True. Else return False."""
     if not answers_db:
         return False
-    question = normalize_ocr_text(ocr_obs)
+    question = question_signature(ocr_obs)
     if not question:
         return False
     match = find_question_match(question, answers_db, QUESTION_MATCH_THRESHOLD)
@@ -964,7 +973,7 @@ def run_detection_loop(
                 [random.choice(circle_matches)] if circle_matches else [])
 
             ocr_obs = ocr_image(shot)
-            question = normalize_ocr_text(ocr_obs)
+            question = question_signature(ocr_obs)
             answer_clicked = try_click_known_answer(
                 shot, ocr_obs, answers_db, roi, stopper, on_log=on_log)
 
