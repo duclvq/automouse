@@ -26,6 +26,13 @@ MAX_INTERVAL = 30     # Khoảng thời gian tối đa giữa 2 hành động (g
 MIN_DURATION = 0.5    # Thời gian di chuyển chuột tối thiểu (giây)
 MAX_DURATION = 1.5    # Thời gian di chuyển chuột tối đa (giây)
 EDGE_MARGIN = 50      # Cách mép màn hình ít nhất bao nhiêu pixel (tránh kích hoạt failsafe)
+# Vùng click ngẫu nhiên (theo tỉ lệ màn hình)
+# Ngang: trái -> phải (0.0 = trái, 1.0 = phải)
+REGION_X_MIN = 0.20
+REGION_X_MAX = 0.70
+# Dọc: tính từ DƯỚI lên (0.0 = đáy màn hình, 1.0 = đỉnh)
+REGION_Y_MIN_FROM_BOTTOM = 0.20
+REGION_Y_MAX_FROM_BOTTOM = 0.60
 SCROLL_MIN = -5       # Scroll lên (âm) tối thiểu
 SCROLL_MAX = 5        # Scroll xuống (dương) tối đa
 CLICK_CHANCE = 0.2    # Xác suất click sau khi di chuột (20%)
@@ -43,9 +50,15 @@ def random_mouse_loop():
     print("Đang chạy... (Ctrl+C để dừng, hoặc kéo chuột vào góc màn hình)\n")
 
     while True:
-        # Vị trí ngẫu nhiên trong vùng an toàn
-        x = random.randint(EDGE_MARGIN, screen_width - EDGE_MARGIN)
-        y = random.randint(EDGE_MARGIN, screen_height - EDGE_MARGIN)
+        # Vị trí ngẫu nhiên trong vùng cấu hình (giới hạn thêm bởi EDGE_MARGIN để an toàn failsafe)
+        x_min = max(EDGE_MARGIN, int(screen_width * REGION_X_MIN))
+        x_max = min(screen_width - EDGE_MARGIN, int(screen_width * REGION_X_MAX))
+        # Dọc tính từ dưới lên: y_screen = screen_height - frac * screen_height
+        y_min = max(EDGE_MARGIN, int(screen_height * (1 - REGION_Y_MAX_FROM_BOTTOM)))
+        y_max = min(screen_height - EDGE_MARGIN, int(screen_height * (1 - REGION_Y_MIN_FROM_BOTTOM)))
+
+        x = random.randint(x_min, x_max)
+        y = random.randint(y_min, y_max)
 
         # Thời gian di chuột ngẫu nhiên (chuyển động mượt)
         duration = random.uniform(MIN_DURATION, MAX_DURATION)
