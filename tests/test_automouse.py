@@ -71,3 +71,31 @@ def test_find_matches_returns_empty_when_no_match():
     haystack = np.zeros((100, 100), dtype=np.uint8)
     template = np.full((20, 20), 255, dtype=np.uint8)
     assert find_matches(haystack, template, threshold=0.95) == []
+
+
+from automouse import list_rectangle_templates
+
+
+def test_list_rectangle_templates_sorted(tmp_path: Path):
+    (tmp_path / "003.png").write_bytes(b"")
+    (tmp_path / "001.png").write_bytes(b"")
+    (tmp_path / "002.png").write_bytes(b"")
+    result = list_rectangle_templates(tmp_path)
+    assert [p.name for p in result] == ["001.png", "002.png", "003.png"]
+
+
+def test_list_rectangle_templates_ignores_non_matching(tmp_path: Path):
+    (tmp_path / "001.png").write_bytes(b"")
+    (tmp_path / "foo.png").write_bytes(b"")
+    (tmp_path / "1.png").write_bytes(b"")
+    (tmp_path / "001.txt").write_bytes(b"")
+    result = list_rectangle_templates(tmp_path)
+    assert [p.name for p in result] == ["001.png"]
+
+
+def test_list_rectangle_templates_empty_dir(tmp_path: Path):
+    assert list_rectangle_templates(tmp_path) == []
+
+
+def test_list_rectangle_templates_missing_dir(tmp_path: Path):
+    assert list_rectangle_templates(tmp_path / "does_not_exist") == []

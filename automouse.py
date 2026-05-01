@@ -6,6 +6,7 @@ import math
 import numpy as np
 import pyautogui
 import random
+import re
 import sys
 import time
 import tkinter as tk
@@ -92,6 +93,19 @@ def find_matches(
     th, tw = template.shape[:2]
     min_distance = min(tw, th) / 2
     return non_max_suppression(points, scores, min_distance)
+
+
+_RECT_NAME_RE = re.compile(r"^(\d{3})\.png$")
+
+
+def list_rectangle_templates(directory: Path) -> List[Path]:
+    """Return zero-padded NNN.png files under directory, sorted by name."""
+    if not directory.is_dir():
+        return []
+    return sorted(
+        p for p in directory.iterdir()
+        if p.is_file() and _RECT_NAME_RE.match(p.name)
+    )
 
 
 class App:
