@@ -271,3 +271,33 @@ def test_largest_connected_region_single_pixel():
     mask = np.zeros((10, 10), dtype=bool)
     mask[5, 7] = True
     assert largest_connected_region(mask) == (7, 5, 1, 1)
+
+
+from automouse import find_text_box
+
+
+def test_find_text_box_exact_match():
+    obs = [("apple", (10, 10, 50, 20)),
+           ("banana", (10, 40, 60, 20))]
+    assert find_text_box(obs, "banana") == (10, 40, 60, 20)
+
+
+def test_find_text_box_case_insensitive():
+    obs = [("Banana", (5, 5, 60, 20))]
+    assert find_text_box(obs, "banana") == (5, 5, 60, 20)
+
+
+def test_find_text_box_strips_whitespace():
+    obs = [("  banana  ", (5, 5, 60, 20))]
+    assert find_text_box(obs, "banana") == (5, 5, 60, 20)
+
+
+def test_find_text_box_fuzzy_match():
+    obs = [("bananaa", (5, 5, 60, 20))]  # one extra char
+    # SequenceMatcher.ratio("banana", "bananaa") ≈ 0.92
+    assert find_text_box(obs, "banana") == (5, 5, 60, 20)
+
+
+def test_find_text_box_no_match():
+    obs = [("apple", (10, 10, 50, 20))]
+    assert find_text_box(obs, "banana") is None

@@ -191,6 +191,27 @@ def largest_connected_region(mask: np.ndarray) -> Optional[BBox]:
     return (x, y, w, h)
 
 
+def find_text_box(observations: List[Tuple[str, BBox]],
+                  needle: str) -> Optional[BBox]:
+    """Return the bbox of the observation whose text best matches needle.
+    Case-insensitive trimmed equality first; then SequenceMatcher >=
+    ANSWER_MATCH_THRESHOLD. Returns None if no qualifying observation."""
+    needle_norm = needle.strip().lower()
+    if not needle_norm:
+        return None
+    best = None
+    best_ratio = ANSWER_MATCH_THRESHOLD
+    for text, box in observations:
+        text_norm = text.strip().lower()
+        if text_norm == needle_norm:
+            return box
+        ratio = SequenceMatcher(None, text_norm, needle_norm).ratio()
+        if ratio >= best_ratio:
+            best = box
+            best_ratio = ratio
+    return best
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)
