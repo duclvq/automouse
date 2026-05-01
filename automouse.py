@@ -25,8 +25,8 @@ CIRCLE_PATH = TEMPLATES_DIR / "circle.png"
 RECTANGLE_PATH = TEMPLATES_DIR / "rectangle.png"
 
 MATCH_THRESHOLD = 0.8
-MIN_DELAY = 0.5
-MAX_DELAY = 1.0
+MIN_DELAY = 0.17
+MAX_DELAY = 0.33
 STOP_HOLD_KEY = "s"
 STOP_HOLD_KEYCODE = 1  # macOS virtual keycode for 's' (kVK_ANSI_S)
 STOP_HOLD_SECONDS = 2.0
@@ -34,9 +34,9 @@ STOP_POLL_INTERVAL = 0.05
 
 # Human-like cursor movement: cubic Bezier path from current pos to target,
 # with random perpendicular curvature, per-step jitter, and small random pauses.
-MOVE_PIXELS_PER_STEP = 12       # path resolution
-MOVE_STEP_MIN_DELAY = 0.005     # seconds between intermediate moves
-MOVE_STEP_MAX_DELAY = 0.015
+MOVE_PIXELS_PER_STEP = 36       # path resolution
+MOVE_STEP_MIN_DELAY = 0.002     # seconds between intermediate moves
+MOVE_STEP_MAX_DELAY = 0.005
 MOVE_CURVE_STRENGTH = 0.18      # max perpendicular offset as fraction of distance
 MOVE_JITTER_PIXELS = 0.7        # stddev of per-step Gaussian jitter
 
@@ -345,6 +345,7 @@ def _click_all(matches: List[Tuple[int, int]],
 
 def run_detection_loop() -> None:
     pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0  # we manage our own per-step delays
 
     roi = load_roi(CONFIG_PATH)
     if roi is None:
