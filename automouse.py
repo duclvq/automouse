@@ -523,18 +523,24 @@ class App:
         stopper = _HoldToStop()
         stop_win = tk.Toplevel(self.root)
         stop_win.title("Automouse — running")
-        stop_win.geometry("260x110")
+        stop_win.geometry("280x140")
         stop_win.attributes("-topmost", True)
         tk.Label(stop_win,
                  text="Click loop is running.\n"
                       "Click Stop, hold 's' for 2s,\n"
                       "or move mouse to a screen corner.",
-                 justify="center").pack(pady=8)
+                 justify="center").pack(pady=4)
+        mem_var = tk.StringVar(value="Memory: 0 learned questions")
+        tk.Label(stop_win, textvariable=mem_var).pack(pady=2)
         tk.Button(stop_win, text="Stop", width=20,
-                  command=lambda: setattr(stopper, "stop", True)).pack()
+                  command=lambda: setattr(stopper, "stop", True)).pack(pady=4)
+
+        def on_memory_change(n: int) -> None:
+            mem_var.set(f"Memory: {n} learned question{'s' if n != 1 else ''}")
 
         try:
-            run_detection_loop(stopper=stopper, tk_root=self.root)
+            run_detection_loop(stopper=stopper, tk_root=self.root,
+                               on_memory_change=on_memory_change)
         finally:
             try:
                 stop_win.destroy()
@@ -558,11 +564,17 @@ class App:
         blue_str = (f"OK ({blue[0]}, {blue[1]}, {blue[2]})"
                     if blue is not None else "not set")
 
+        try:
+            mem_count = len(load_answers_db(ANSWERS_PATH))
+        except Exception:
+            mem_count = 0
         self.status.config(text=(
             f"ROI:        {mark(CONFIG_PATH)}\n"
             f"Circle:     {mark(CIRCLE_PATH)}\n"
             f"Rectangles: {len(rect_paths)}\n"
-            f"Blue color: {blue_str}"
+            f"Blue color: {blue_str}\n"
+            f"Memory:     {mem_count} learned question"
+            f"{'s' if mem_count != 1 else ''}"
         ))
         all_ready = (CONFIG_PATH.exists()
                      and CIRCLE_PATH.exists()
@@ -744,6 +756,7 @@ def _click_all(matches: List[Tuple[int, int]],
 def run_detection_loop(
     stopper: Optional[_HoldToStop] = None,
     tk_root: Optional[tk.Misc] = None,
+    on_memory_change: Optional[callable] = None,
 ) -> None:
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0  # we manage our own per-step delays
@@ -781,6 +794,8 @@ def run_detection_loop(
     answers_db = load_answers_db(ANSWERS_PATH)
     if blue_rgb is None:
         print("  [memory] blue_rgb not set; question/answer feature off")
+    if on_memory_change is not None:
+        on_memory_change(len(answers_db))
 
     for tpl, name in [(circle_tpl, "circle")] + [
             (t, n) for n, t in rectangle_templates]:
@@ -831,7 +846,10 @@ def run_detection_loop(
                       f"clicking {len(picked_circle)}")
                 _click_all(picked_circle, circle_tpl.shape, roi, stopper)
                 if blue_rgb is not None and question:
+                    before = len(answers_db)
                     observe_after_click(roi, blue_rgb, question, answers_db)
+                    if on_memory_change is not None and len(answers_db) != before:
+                        on_memory_change(len(answers_db))
 
             if stopper.check():
                 break
