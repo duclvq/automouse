@@ -301,3 +301,33 @@ def test_find_text_box_fuzzy_match():
 def test_find_text_box_no_match():
     obs = [("apple", (10, 10, 50, 20))]
     assert find_text_box(obs, "banana") is None
+
+
+from automouse import text_in_region
+
+
+def test_text_in_region_collects_overlapping_left_to_right():
+    # All three observations vertically overlap region y=40..50.
+    obs = [("world", (200, 40, 50, 10)),
+           ("hello", (50, 40, 50, 10)),
+           ("there", (130, 40, 50, 10))]
+    region = (0, 40, 300, 10)
+    assert text_in_region(obs, region) == "hello there world"
+
+
+def test_text_in_region_excludes_non_overlapping():
+    obs = [("hello", (0, 40, 50, 10)),
+           ("ignore", (0, 100, 50, 10))]  # outside y range of region
+    region = (0, 40, 50, 10)
+    assert text_in_region(obs, region) == "hello"
+
+
+def test_text_in_region_partial_vertical_overlap_kept():
+    # Observation y=45..55 overlaps region y=50..60 by 5 pixels (ok).
+    obs = [("hi", (0, 45, 20, 10))]
+    region = (0, 50, 20, 10)
+    assert text_in_region(obs, region) == "hi"
+
+
+def test_text_in_region_no_observations():
+    assert text_in_region([], (0, 0, 10, 10)) == ""

@@ -212,6 +212,21 @@ def find_text_box(observations: List[Tuple[str, BBox]],
     return best
 
 
+def text_in_region(observations: List[Tuple[str, BBox]],
+                   region: BBox) -> str:
+    """Return concatenated text of observations whose bbox vertically
+    overlaps `region` (Y ranges intersect by >=1 px), sorted by X."""
+    rx, ry, rw, rh = region
+    r_y0, r_y1 = ry, ry + rh
+    overlapping: List[Tuple[int, str]] = []
+    for text, (x, y, w, h) in observations:
+        o_y0, o_y1 = y, y + h
+        if o_y1 > r_y0 and o_y0 < r_y1:  # any vertical overlap
+            overlapping.append((x, text))
+    overlapping.sort(key=lambda p: p[0])
+    return " ".join(t for _, t in overlapping)
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         migrate_legacy_rectangle(TEMPLATES_DIR)
