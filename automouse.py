@@ -343,6 +343,8 @@ class App:
                   command=self.on_set_roi).pack(pady=4)
         tk.Button(root, text="Capture circle template", width=32,
                   command=self.on_capture_circle).pack(pady=4)
+        tk.Button(root, text="Capture blue line sample", width=32,
+                  command=self.on_capture_blue).pack(pady=4)
 
         tk.Label(root, text="Rectangle templates:",
                  anchor="w").pack(fill="x", padx=8, pady=(8, 0))
@@ -387,6 +389,17 @@ class App:
         screenshot, (x, y, w, h) = result
         CIRCLE_PATH.parent.mkdir(parents=True, exist_ok=True)
         screenshot.crop((x, y, x + w, y + h)).save(CIRCLE_PATH)
+        self.refresh_status()
+
+    def on_capture_blue(self) -> None:
+        result = _capture_rectangle(self.root)
+        if result is None:
+            return
+        screenshot, (x, y, w, h) = result
+        crop = screenshot.crop((x, y, x + w, y + h))
+        BLUE_SAMPLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        crop.save(BLUE_SAMPLE_PATH)
+        save_blue_rgb(CONFIG_PATH, dominant_color(crop))
         self.refresh_status()
 
     def on_add_rectangle(self) -> None:
@@ -451,10 +464,15 @@ class App:
 
         def mark(p: Path) -> str:
             return "OK" if p.exists() else "missing"
+        blue = load_blue_rgb(CONFIG_PATH)
+        blue_str = (f"OK ({blue[0]}, {blue[1]}, {blue[2]})"
+                    if blue is not None else "not set")
+
         self.status.config(text=(
             f"ROI:        {mark(CONFIG_PATH)}\n"
             f"Circle:     {mark(CIRCLE_PATH)}\n"
-            f"Rectangles: {len(rect_paths)}"
+            f"Rectangles: {len(rect_paths)}\n"
+            f"Blue color: {blue_str}"
         ))
         all_ready = (CONFIG_PATH.exists()
                      and CIRCLE_PATH.exists()
