@@ -358,8 +358,10 @@ def run_detection_loop() -> None:
             haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
 
             circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
-            print(f"  circles:    {len(circle_matches)} match(es)")
-            _click_all(circle_matches, circle_tpl.shape, roi, stopper)
+            picked_circle = [random.choice(circle_matches)] if circle_matches else []
+            print(f"  circles:    {len(circle_matches)} match(es), "
+                  f"clicking {len(picked_circle)}")
+            _click_all(picked_circle, circle_tpl.shape, roi, stopper)
             if stopper.check():
                 break
 
