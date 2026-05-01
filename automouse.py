@@ -679,7 +679,8 @@ class App:
             except tk.TclError:
                 pass
             try:
-                self.root.destroy()
+                self.root.deiconify()
+                self.refresh_status()
             except tk.TclError:
                 pass
 
