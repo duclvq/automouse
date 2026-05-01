@@ -5,6 +5,8 @@ import json
 import math
 import numpy as np
 import pyautogui
+import random
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -114,7 +116,31 @@ class App:
         self.refresh_status()
 
     def on_run(self) -> None:
-        messagebox.showinfo("Automouse", "Run not implemented yet")
+        # Validate up front; the button is normally disabled when files
+        # are missing, but double-check in case state drifted.
+        if not (CONFIG_PATH.exists() and CIRCLE_PATH.exists()
+                and RECTANGLE_PATH.exists()):
+            messagebox.showerror("Automouse", "ROI or templates missing.")
+            return
+
+        roi = load_roi(CONFIG_PATH)
+        rx, ry, rw, rh = roi
+        for path, name in ((CIRCLE_PATH, "circle"), (RECTANGLE_PATH, "rectangle")):
+            tpl = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+            if tpl is None:
+                messagebox.showerror("Automouse", f"Could not read {path}.")
+                return
+            th, tw = tpl.shape[:2]
+            if tw > rw or th > rh:
+                messagebox.showerror(
+                    "Automouse",
+                    f"{name} template ({tw}x{th}) is larger than ROI "
+                    f"({rw}x{rh}). Re-capture a smaller template or a "
+                    f"larger ROI.")
+                return
+
+        self.root.destroy()
+        run_detection_loop()
 
     def refresh_status(self) -> None:
         def mark(p: Path) -> str:
@@ -196,6 +222,64 @@ def _pil_to_tk(image: Image.Image):
     # Local import — only needed when GUI is in use, and avoids hard-coupling at module load.
     from PIL import ImageTk
     return ImageTk.PhotoImage(image)
+
+
+def _click_all(matches: List[Tuple[int, int]],
+               template_shape: Tuple[int, int],
+               roi: ROI) -> None:
+    """Click each match center with a random delay between clicks."""
+    th, tw = template_shape[:2]
+    rx, ry, _, _ = roi
+    for mx, my in matches:
+        cx = rx + mx + tw // 2
+        cy = ry + my + th // 2
+        pyautogui.click(cx, cy)
+        time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+
+
+def run_detection_loop() -> None:
+    pyautogui.FAILSAFE = True
+
+    roi = load_roi(CONFIG_PATH)
+    if roi is None:
+        print("Missing ROI config; run the GUI first.")
+        return
+    rx, ry, rw, rh = roi
+
+    circle_tpl = cv2.imread(str(CIRCLE_PATH), cv2.IMREAD_GRAYSCALE)
+    rect_tpl = cv2.imread(str(RECTANGLE_PATH), cv2.IMREAD_GRAYSCALE)
+    if circle_tpl is None or rect_tpl is None:
+        print("Missing template files; run the GUI first.")
+        return
+
+    for tpl, name in ((circle_tpl, "circle"), (rect_tpl, "rectangle")):
+        th, tw = tpl.shape[:2]
+        if tw > rw or th > rh:
+            print(f"{name} template ({tw}x{th}) is larger than ROI ({rw}x{rh}).")
+            return
+
+    print(f"Running detection loop. ROI={roi}. Ctrl+C to stop, or move "
+          f"mouse to a screen corner to trigger pyautogui failsafe.")
+
+    try:
+        while True:
+            shot = pyautogui.screenshot(region=roi)
+            haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
+
+            circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
+            print(f"  circles:    {len(circle_matches)} match(es)")
+            _click_all(circle_matches, circle_tpl.shape, roi)
+
+            rect_matches = find_matches(haystack, rect_tpl, MATCH_THRESHOLD)
+            print(f"  rectangles: {len(rect_matches)} match(es)")
+            _click_all(rect_matches, rect_tpl.shape, roi)
+
+            time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+    except pyautogui.FailSafeException:
+        print("Failsafe triggered. Exiting.")
+        sys.exit(0)
+    except KeyboardInterrupt:
+        print("Stopped by user. Bye.")
 
 
 def main() -> None:
