@@ -625,8 +625,10 @@ class App:
 
         def mark(p: Path) -> str:
             return "OK" if p.exists() else "missing"
-        anchor = load_answer_anchor(CONFIG_PATH)
-        anchor_str = (f"'{anchor}'" if anchor else "not set")
+        saved_anchor = load_answer_anchor(CONFIG_PATH)
+        effective = saved_anchor or ANSWER_ANCHOR_DEFAULT
+        anchor_str = (f"'{effective}'" if saved_anchor
+                      else f"'{effective}' (default)")
 
         try:
             mem_count = len(load_answers_db(ANSWERS_PATH))
@@ -854,12 +856,9 @@ def run_detection_loop(
         print("All rectangle templates failed to load.")
         return
 
-    anchor = load_answer_anchor(CONFIG_PATH)
+    anchor = load_answer_anchor(CONFIG_PATH) or ANSWER_ANCHOR_DEFAULT
     answers_db = load_answers_db(ANSWERS_PATH)
-    if anchor is None:
-        print("  [memory] no answer_anchor set; question/answer feature off")
-    else:
-        print(f"  [memory] using anchor phrase: {anchor!r}")
+    print(f"  [memory] using anchor phrase: {anchor!r}")
     if on_memory_change is not None:
         on_memory_change(len(answers_db))
 
@@ -898,20 +897,16 @@ def run_detection_loop(
             picked_circle = (
                 [random.choice(circle_matches)] if circle_matches else [])
 
-            answer_clicked = False
-            ocr_obs: List[Tuple[str, BBox]] = []
-            question = ""
-            if anchor is not None:
-                ocr_obs = ocr_image(shot)
-                question = normalize_ocr_text(ocr_obs)
-                answer_clicked = try_click_known_answer(
-                    shot, ocr_obs, answers_db, roi, stopper)
+            ocr_obs = ocr_image(shot)
+            question = normalize_ocr_text(ocr_obs)
+            answer_clicked = try_click_known_answer(
+                shot, ocr_obs, answers_db, roi, stopper)
 
             if not answer_clicked:
                 print(f"  circles:    {len(circle_matches)} match(es), "
                       f"clicking {len(picked_circle)}")
                 _click_all(picked_circle, circle_tpl.shape, roi, stopper)
-                if anchor is not None and question:
+                if question:
                     before = len(answers_db)
                     observe_after_click(roi, anchor, question, answers_db)
                     if on_memory_change is not None and len(answers_db) != before:
