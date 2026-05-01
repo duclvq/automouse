@@ -178,3 +178,33 @@ def test_normalize_ocr_text_dedupes_lines():
 
 def test_normalize_ocr_text_empty():
     assert normalize_ocr_text([]) == ""
+
+
+from automouse import find_question_match
+
+
+def test_find_question_match_returns_match_above_threshold():
+    db = [{"question": "what is the capital of france", "answer": "paris"}]
+    result = find_question_match("what is the capital of france", db, threshold=0.9)
+    assert result == db[0]
+
+
+def test_find_question_match_returns_none_below_threshold():
+    db = [{"question": "what is the capital of france", "answer": "paris"}]
+    result = find_question_match("totally unrelated text", db, threshold=0.9)
+    assert result is None
+
+
+def test_find_question_match_picks_best_above_threshold():
+    db = [
+        {"question": "the quick brown fox", "answer": "jumps"},
+        {"question": "the quick brown fox jumps over", "answer": "lazy dog"},
+    ]
+    # Closer to the second entry.
+    result = find_question_match("the quick brown fox jumps over the lazy",
+                                 db, threshold=0.7)
+    assert result == db[1]
+
+
+def test_find_question_match_empty_db_returns_none():
+    assert find_question_match("anything", [], threshold=0.9) is None

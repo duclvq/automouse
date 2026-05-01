@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import tkinter as tk
+from difflib import SequenceMatcher
 from pathlib import Path
 from PIL import Image
 from Quartz import (
@@ -18,7 +19,7 @@ from Quartz import (
     kCGEventSourceStateHIDSystemState,
 )
 from tkinter import messagebox
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 TEMPLATES_DIR = Path("templates")
 CONFIG_PATH = TEMPLATES_DIR / "config.json"
@@ -143,6 +144,23 @@ def normalize_ocr_text(observations: List[Tuple[str, BBox]]) -> str:
                     for t, _ in observations
                     if t.strip()})
     return "\n".join(lines)
+
+
+def find_question_match(
+    question: str,
+    db: List[Dict[str, str]],
+    threshold: float = QUESTION_MATCH_THRESHOLD,
+) -> Optional[Dict[str, str]]:
+    """Return the DB entry with highest SequenceMatcher.ratio(question,
+    entry['question']) >= threshold, or None if no entry qualifies."""
+    best = None
+    best_ratio = threshold
+    for entry in db:
+        ratio = SequenceMatcher(None, question, entry["question"]).ratio()
+        if ratio >= best_ratio:
+            best = entry
+            best_ratio = ratio
+    return best
 
 
 class App:
