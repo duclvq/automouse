@@ -405,6 +405,21 @@ def _emit(message: str, on_log: Optional[callable] = None) -> None:
             pass
 
 
+def extract_question_sentence(observations: List[Tuple[str, BBox]]) -> str:
+    """Return the longest OCR observation that contains '?', or '' if none.
+    Used as a short human-readable summary of the current question."""
+    candidates = [t.strip() for t, _ in observations
+                  if "?" in t and len(t.strip()) > 5]
+    if not candidates:
+        return ""
+    return max(candidates, key=len)
+
+
+def _short(s: str, n: int = 80) -> str:
+    s = s.strip()
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
 def try_click_known_answer(
     shot: Image.Image,
     ocr_obs: List[Tuple[str, BBox]],
@@ -424,15 +439,17 @@ def try_click_known_answer(
     if match is None:
         return False
     ans_box = find_text_box(ocr_obs, match["answer"])
+    q_summary = _short(extract_question_sentence(ocr_obs))
     if ans_box is None:
         _emit(f"[memory] match but answer {match['answer']!r} "
-              f"not visible; falling back", on_log)
+              f"not visible; falling back  ◀ Q: {q_summary}", on_log)
         return False
     rx, ry, _, _ = roi
     x, y, w, h = ans_box
     cx = rx + x + w // 2
     cy = ry + y + h // 2
-    _emit(f"[memory] recognized → clicking {match['answer']!r}", on_log)
+    _emit(f"[memory] recognized → click {match['answer']!r}  "
+          f"◀ Q: {q_summary}", on_log)
     _human_move_to(cx, cy)
     pyautogui.click()
     delay = random.uniform(MIN_DELAY, MAX_DELAY)
@@ -457,16 +474,18 @@ def observe_after_click(
     shot = pyautogui.screenshot(region=roi)
     obs = ocr_image(shot)
     answer = find_answer_after_anchor(obs, anchor)
+    q_summary = _short(extract_question_sentence(obs))
     if not answer:
-        _emit(f"[memory] anchor not visible; skipping store", on_log)
+        _emit(f"[memory] anchor not visible; skipping store  "
+              f"◀ Q: {q_summary}", on_log)
         return
     for entry in answers_db:
         if entry["question"] == question and entry["answer"] == answer:
-            _emit(f"[memory] dup, already learned: {answer!r}", on_log)
+            _emit(f"[memory] dup: {answer!r}  ◀ Q: {q_summary}", on_log)
             return
     answers_db.append({"question": question, "answer": answer})
     save_answers_db(ANSWERS_PATH, answers_db)
-    _emit(f"[memory] LEARNED: {answer!r}", on_log)
+    _emit(f"[memory] LEARNED: {answer!r}  ◀ Q: {q_summary}", on_log)
 
 
 class App:
