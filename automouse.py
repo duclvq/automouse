@@ -380,6 +380,9 @@ def run_detection_loop() -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "run":
+        run_detection_loop()
+        return
     root = tk.Tk()
     App(root)
     root.mainloop()
