@@ -124,3 +124,28 @@ def test_next_rectangle_number_ignores_non_matching(tmp_path: Path):
     (tmp_path / "999.txt").write_bytes(b"")
     (tmp_path / "abc.png").write_bytes(b"")
     assert next_rectangle_number(tmp_path) == 2
+
+
+from automouse import migrate_legacy_rectangle
+
+
+def test_migrate_legacy_rectangle_moves_file(tmp_path: Path):
+    (tmp_path / "rectangle.png").write_bytes(b"old-bytes")
+    migrate_legacy_rectangle(tmp_path)
+    assert not (tmp_path / "rectangle.png").exists()
+    assert (tmp_path / "rectangles" / "001.png").read_bytes() == b"old-bytes"
+
+
+def test_migrate_legacy_rectangle_noop_if_dir_exists(tmp_path: Path):
+    (tmp_path / "rectangle.png").write_bytes(b"old-bytes")
+    (tmp_path / "rectangles").mkdir()
+    migrate_legacy_rectangle(tmp_path)
+    # Legacy file untouched, nothing copied.
+    assert (tmp_path / "rectangle.png").exists()
+    assert list((tmp_path / "rectangles").iterdir()) == []
+
+
+def test_migrate_legacy_rectangle_noop_if_legacy_missing(tmp_path: Path):
+    migrate_legacy_rectangle(tmp_path)
+    assert not (tmp_path / "rectangle.png").exists()
+    assert not (tmp_path / "rectangles").exists()

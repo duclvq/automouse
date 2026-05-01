@@ -117,6 +117,17 @@ def next_rectangle_number(directory: Path) -> int:
     return max(nums) + 1
 
 
+def migrate_legacy_rectangle(templates_dir: Path) -> None:
+    """If templates_dir/rectangle.png exists and rectangles/ does not,
+    move the legacy file to rectangles/001.png. Idempotent."""
+    legacy = templates_dir / "rectangle.png"
+    new_dir = templates_dir / "rectangles"
+    if not legacy.exists() or new_dir.exists():
+        return
+    new_dir.mkdir(parents=True)
+    legacy.rename(new_dir / "001.png")
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
