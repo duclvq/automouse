@@ -11,6 +11,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 from PIL import Image
+from pynput import keyboard
 from tkinter import messagebox
 from typing import List, Optional, Tuple
 
@@ -22,6 +23,8 @@ RECTANGLE_PATH = TEMPLATES_DIR / "rectangle.png"
 MATCH_THRESHOLD = 0.8
 MIN_DELAY = 0.5
 MAX_DELAY = 1.0
+STOP_HOLD_KEY = "s"
+STOP_HOLD_SECONDS = 2.0
 
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 
@@ -224,13 +227,48 @@ def _pil_to_tk(image: Image.Image):
     return ImageTk.PhotoImage(image)
 
 
+class _HoldToStop:
+    """Sets `stop` to True when STOP_HOLD_KEY is held for STOP_HOLD_SECONDS."""
+
+    def __init__(self) -> None:
+        self.stop = False
+        self._press_started: Optional[float] = None
+        self._listener: Optional[keyboard.Listener] = None
+
+    def start(self) -> None:
+        self._listener = keyboard.Listener(
+            on_press=self._on_press, on_release=self._on_release)
+        self._listener.start()
+
+    def stop_listener(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+
+    def _on_press(self, key) -> None:
+        if getattr(key, "char", None) != STOP_HOLD_KEY:
+            return
+        if self._press_started is None:
+            self._press_started = time.monotonic()
+        elif time.monotonic() - self._press_started >= STOP_HOLD_SECONDS:
+            self.stop = True
+
+    def _on_release(self, key) -> None:
+        if getattr(key, "char", None) != STOP_HOLD_KEY:
+            return
+        self._press_started = None
+
+
 def _click_all(matches: List[Tuple[int, int]],
                template_shape: Tuple[int, int],
-               roi: ROI) -> None:
+               roi: ROI,
+               stopper: Optional[_HoldToStop] = None) -> None:
     """Click each match center with a random delay between clicks."""
     th, tw = template_shape[:2]
     rx, ry, _, _ = roi
     for mx, my in matches:
+        if stopper is not None and stopper.stop:
+            return
         cx = rx + mx + tw // 2
         cy = ry + my + th // 2
         pyautogui.click(cx, cy)
@@ -258,28 +296,41 @@ def run_detection_loop() -> None:
             print(f"{name} template ({tw}x{th}) is larger than ROI ({rw}x{rh}).")
             return
 
-    print(f"Running detection loop. ROI={roi}. Ctrl+C to stop, or move "
-          f"mouse to a screen corner to trigger pyautogui failsafe.")
+    stopper = _HoldToStop()
+    stopper.start()
+
+    print(f"Running detection loop. ROI={roi}. Stop with: Ctrl+C, "
+          f"hold '{STOP_HOLD_KEY}' for {STOP_HOLD_SECONDS}s, or move "
+          f"mouse to a screen corner.")
 
     try:
-        while True:
+        while not stopper.stop:
             shot = pyautogui.screenshot(region=roi)
             haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
 
             circle_matches = find_matches(haystack, circle_tpl, MATCH_THRESHOLD)
             print(f"  circles:    {len(circle_matches)} match(es)")
-            _click_all(circle_matches, circle_tpl.shape, roi)
+            _click_all(circle_matches, circle_tpl.shape, roi, stopper)
+            if stopper.stop:
+                break
 
             rect_matches = find_matches(haystack, rect_tpl, MATCH_THRESHOLD)
             print(f"  rectangles: {len(rect_matches)} match(es)")
-            _click_all(rect_matches, rect_tpl.shape, roi)
+            _click_all(rect_matches, rect_tpl.shape, roi, stopper)
+            if stopper.stop:
+                break
 
             time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+        if stopper.stop:
+            print(f"'{STOP_HOLD_KEY}' held for "
+                  f"{STOP_HOLD_SECONDS}s — stopping.")
     except pyautogui.FailSafeException:
         print("Failsafe triggered. Exiting.")
         sys.exit(0)
     except KeyboardInterrupt:
         print("Stopped by user. Bye.")
+    finally:
+        stopper.stop_listener()
 
 
 def main() -> None:
