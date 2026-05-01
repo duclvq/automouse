@@ -28,6 +28,14 @@ STOP_HOLD_KEYCODE = 1  # macOS virtual keycode for 's' (kVK_ANSI_S)
 STOP_HOLD_SECONDS = 2.0
 STOP_POLL_INTERVAL = 0.05
 
+# Human-like cursor movement: cubic Bezier path from current pos to target,
+# with random perpendicular curvature, per-step jitter, and small random pauses.
+MOVE_PIXELS_PER_STEP = 12       # path resolution
+MOVE_STEP_MIN_DELAY = 0.005     # seconds between intermediate moves
+MOVE_STEP_MAX_DELAY = 0.015
+MOVE_CURVE_STRENGTH = 0.18      # max perpendicular offset as fraction of distance
+MOVE_JITTER_PIXELS = 0.7        # stddev of per-step Gaussian jitter
+
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 
 
@@ -262,6 +270,40 @@ def _sleep_with_check(seconds: float, stopper: _HoldToStop) -> None:
         time.sleep(min(STOP_POLL_INTERVAL, remaining))
 
 
+def _human_move_to(x: int, y: int) -> None:
+    """Move the cursor to (x, y) along a cubic-Bezier curve with jitter,
+    instead of jumping straight to the target. Helps mask automation."""
+    sx, sy = pyautogui.position()
+    dx, dy = x - sx, y - sy
+    distance = math.hypot(dx, dy)
+    if distance < 3:
+        pyautogui.moveTo(x, y)
+        return
+
+    # Two control points offset perpendicular to the straight line by a
+    # random fraction of the total distance, in opposite-sign-friendly ranges.
+    perp_x, perp_y = -dy / distance, dx / distance
+    o1 = random.uniform(-MOVE_CURVE_STRENGTH, MOVE_CURVE_STRENGTH) * distance
+    o2 = random.uniform(-MOVE_CURVE_STRENGTH, MOVE_CURVE_STRENGTH) * distance
+    cp1x = sx + dx * 0.3 + perp_x * o1
+    cp1y = sy + dy * 0.3 + perp_y * o1
+    cp2x = sx + dx * 0.7 + perp_x * o2
+    cp2y = sy + dy * 0.7 + perp_y * o2
+
+    steps = max(10, int(distance / MOVE_PIXELS_PER_STEP))
+    for i in range(1, steps):
+        # Ease-in-out so velocity ramps up and down, not constant.
+        t = (1 - math.cos(math.pi * i / steps)) / 2
+        u = 1 - t
+        bx = u**3 * sx + 3*u**2*t * cp1x + 3*u*t**2 * cp2x + t**3 * x
+        by = u**3 * sy + 3*u**2*t * cp1y + 3*u*t**2 * cp2y + t**3 * y
+        bx += random.gauss(0, MOVE_JITTER_PIXELS)
+        by += random.gauss(0, MOVE_JITTER_PIXELS)
+        pyautogui.moveTo(bx, by)
+        time.sleep(random.uniform(MOVE_STEP_MIN_DELAY, MOVE_STEP_MAX_DELAY))
+    pyautogui.moveTo(x, y)
+
+
 def _click_all(matches: List[Tuple[int, int]],
                template_shape: Tuple[int, int],
                roi: ROI,
@@ -274,7 +316,8 @@ def _click_all(matches: List[Tuple[int, int]],
             return
         cx = rx + mx + tw // 2
         cy = ry + my + th // 2
-        pyautogui.click(cx, cy)
+        _human_move_to(cx, cy)
+        pyautogui.click()
         delay = random.uniform(MIN_DELAY, MAX_DELAY)
         if stopper is not None:
             _sleep_with_check(delay, stopper)
