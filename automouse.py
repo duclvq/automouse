@@ -30,6 +30,7 @@ TEMPLATES_DIR = Path("templates")
 CONFIG_PATH = TEMPLATES_DIR / "config.json"
 CIRCLE_PATH = TEMPLATES_DIR / "circle.png"
 RECTANGLES_DIR = TEMPLATES_DIR / "rectangles"
+END_FLOW_DIR = TEMPLATES_DIR / "end_flow"
 ANSWERS_PATH = TEMPLATES_DIR / "answers.json"
 BLUE_SAMPLE_PATH = TEMPLATES_DIR / "blue_sample.png"
 
@@ -61,6 +62,12 @@ QUESTION_MATCH_THRESHOLD = 0.9
 ANSWER_MATCH_THRESHOLD = 0.9
 ANSWER_ANCHOR_DEFAULT = "Câu trả lời chính xác là"
 ANCHOR_MATCH_THRESHOLD = 0.85
+
+# When the primary rectangle (e.g. 'Tiếp') goes missing for this many
+# consecutive cycles, run the end-of-batch sequence (kết thúc → OK →
+# luyện tất cả) instead of waiting indefinitely.
+RECT_MISS_THRESHOLD = 3
+END_FLOW_STEP_DELAY = 1.2
 
 ROI = Tuple[int, int, int, int]  # (x, y, width, height) in screen pixels
 BBox = Tuple[int, int, int, int]  # (x, y, w, h) in pixels, top-left origin
@@ -533,7 +540,7 @@ class App:
 
         self.root = root
         root.title("Automouse")
-        root.geometry("320x420")
+        root.geometry("340x600")
 
         tk.Button(root, text="Set ROI", width=32,
                   command=self.on_set_roi).pack(pady=4)
@@ -560,6 +567,25 @@ class App:
                   command=self.on_add_rectangle).pack(side="left", padx=2)
         tk.Button(btn_row, text="Delete selected",
                   command=self.on_delete_rectangle).pack(side="left", padx=2)
+
+        tk.Label(root, text="End-of-batch flow (run when Tiếp goes missing):",
+                 anchor="w").pack(fill="x", padx=8, pady=(8, 0))
+
+        end_frame = tk.Frame(root)
+        end_frame.pack(fill="both", expand=False, padx=8)
+        end_scroll = tk.Scrollbar(end_frame, orient="vertical")
+        self.end_list = tk.Listbox(end_frame, height=4,
+                                   yscrollcommand=end_scroll.set)
+        end_scroll.config(command=self.end_list.yview)
+        end_scroll.pack(side="right", fill="y")
+        self.end_list.pack(side="left", fill="both", expand=True)
+
+        end_btn_row = tk.Frame(root)
+        end_btn_row.pack(pady=4)
+        tk.Button(end_btn_row, text="+ Add end-flow step",
+                  command=self.on_add_end_flow).pack(side="left", padx=2)
+        tk.Button(end_btn_row, text="Delete selected",
+                  command=self.on_delete_end_flow).pack(side="left", padx=2)
 
         self.run_btn = tk.Button(root, text="Run", width=32,
                                  command=self.on_run)
@@ -621,6 +647,27 @@ class App:
             return
         name = self.rect_list.get(sel[0])
         path = RECTANGLES_DIR / name
+        if path.exists():
+            path.unlink()
+        self.refresh_status()
+
+    def on_add_end_flow(self) -> None:
+        result = _capture_rectangle(self.root)
+        if result is None:
+            return
+        screenshot, (x, y, w, h) = result
+        END_FLOW_DIR.mkdir(parents=True, exist_ok=True)
+        n = next_rectangle_number(END_FLOW_DIR)
+        path = END_FLOW_DIR / f"{n:03d}.png"
+        screenshot.crop((x, y, x + w, y + h)).save(path)
+        self.refresh_status()
+
+    def on_delete_end_flow(self) -> None:
+        sel = self.end_list.curselection()
+        if not sel:
+            return
+        name = self.end_list.get(sel[0])
+        path = END_FLOW_DIR / name
         if path.exists():
             path.unlink()
         self.refresh_status()
@@ -710,10 +757,14 @@ class App:
 
     def refresh_status(self) -> None:
         rect_paths = list_rectangle_templates(RECTANGLES_DIR)
+        end_paths = list_rectangle_templates(END_FLOW_DIR)
 
         self.rect_list.delete(0, tk.END)
         for p in rect_paths:
             self.rect_list.insert(tk.END, p.name)
+        self.end_list.delete(0, tk.END)
+        for p in end_paths:
+            self.end_list.insert(tk.END, p.name)
 
         def mark(p: Path) -> str:
             return "OK" if p.exists() else "missing"
@@ -730,6 +781,7 @@ class App:
             f"ROI:        {mark(CONFIG_PATH)}\n"
             f"Circle:     {mark(CIRCLE_PATH)}\n"
             f"Rectangles: {len(rect_paths)}\n"
+            f"End-flow:   {len(end_paths)} step(s)\n"
             f"Anchor:     {anchor_str}\n"
             f"Memory:     {mem_count} learned question"
             f"{'s' if mem_count != 1 else ''}"
@@ -911,6 +963,44 @@ def _click_all(matches: List[Tuple[int, int]],
             time.sleep(delay)
 
 
+def run_end_flow(
+    end_flow_paths: List[Path],
+    roi: ROI,
+    stopper: _HoldToStop,
+    tk_root: Optional[tk.Misc] = None,
+    on_log: Optional[callable] = None,
+) -> bool:
+    """Run the end-of-batch sequence: for each template in order, take a
+    fresh screenshot, find a match, click it, wait. Returns True if
+    every step found and clicked its target; False if any step bailed
+    (template not loaded, screenshot failed, no match, or stop)."""
+    if not end_flow_paths:
+        return False
+    _emit(f"[end-flow] running ({len(end_flow_paths)} step(s))", on_log)
+    for path in end_flow_paths:
+        if stopper.check():
+            return False
+        tpl = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if tpl is None:
+            _emit(f"[end-flow] could not load {path.name}; abort", on_log)
+            return False
+        try:
+            shot = pyautogui.screenshot(region=roi)
+        except Exception as e:
+            _emit(f"[end-flow] screenshot failed: {e}; abort", on_log)
+            return False
+        haystack = cv2.cvtColor(np.array(shot), cv2.COLOR_RGB2GRAY)
+        matches = find_matches(haystack, tpl, MATCH_THRESHOLD)
+        if not matches:
+            _emit(f"[end-flow] {path.name} not found; abort", on_log)
+            return False
+        _emit(f"[end-flow] click {path.name}", on_log)
+        _click_all([matches[0]], tpl.shape, roi, stopper)
+        _sleep_with_check(END_FLOW_STEP_DELAY, stopper, tk_root)
+    _emit(f"[end-flow] done", on_log)
+    return True
+
+
 def run_detection_loop(
     stopper: Optional[_HoldToStop] = None,
     tk_root: Optional[tk.Misc] = None,
@@ -951,7 +1041,9 @@ def run_detection_loop(
 
     anchor = load_answer_anchor(CONFIG_PATH) or ANSWER_ANCHOR_DEFAULT
     answers_db = load_answers_db(ANSWERS_PATH)
+    end_flow_paths = list_rectangle_templates(END_FLOW_DIR)
     print(f"  [memory] using anchor phrase: {anchor!r}")
+    print(f"  [end-flow] {len(end_flow_paths)} step(s) configured")
     if on_memory_change is not None:
         on_memory_change(len(answers_db))
 
@@ -975,6 +1067,7 @@ def run_detection_loop(
     cycle = 0
     cycles_until_break = random.randint(BREAK_AFTER_MIN_CYCLES,
                                         BREAK_AFTER_MAX_CYCLES)
+    rect_miss_streak = 0
 
     try:
         while not stopper.check():
@@ -1027,14 +1120,27 @@ def run_detection_loop(
                       f"using stale haystack", on_log)
                 rect_haystack = haystack
 
+            cycle_rect_hits = 0
             for name, tpl in rectangle_templates:
                 matches = find_matches(rect_haystack, tpl, MATCH_THRESHOLD)
                 print(f"  {name}: {len(matches)} match(es)")
+                if matches:
+                    cycle_rect_hits += 1
                 _click_all(matches, tpl.shape, roi, stopper)
                 if stopper.check():
                     break
             if stopper.check():
                 break
+
+            if cycle_rect_hits == 0 and rectangle_templates:
+                rect_miss_streak += 1
+                if (rect_miss_streak >= RECT_MISS_THRESHOLD
+                        and end_flow_paths):
+                    if run_end_flow(end_flow_paths, roi, stopper,
+                                    tk_root=tk_root, on_log=on_log):
+                        rect_miss_streak = 0
+            else:
+                rect_miss_streak = 0
 
             cycle += 1
             if cycle >= cycles_until_break:
