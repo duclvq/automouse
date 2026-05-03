@@ -460,6 +460,17 @@ def _short(s: str, n: int = 80) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _fmt_remaining(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
 def try_click_known_answer(
     shot: Image.Image,
     ocr_obs: List[Tuple[str, BBox]],
@@ -540,7 +551,7 @@ class App:
 
         self.root = root
         root.title("Automouse")
-        root.geometry("340x600")
+        root.geometry("360x660")
 
         tk.Button(root, text="Set ROI", width=32,
                   command=self.on_set_roi).pack(pady=4)
@@ -586,6 +597,13 @@ class App:
                   command=self.on_add_end_flow).pack(side="left", padx=2)
         tk.Button(end_btn_row, text="Delete selected",
                   command=self.on_delete_end_flow).pack(side="left", padx=2)
+
+        timer_frame = tk.Frame(root)
+        timer_frame.pack(pady=(8, 0))
+        tk.Label(timer_frame, text="Stop after (minutes, blank = no limit):"
+                 ).pack(side="left")
+        self.timer_entry = tk.Entry(timer_frame, width=8)
+        self.timer_entry.pack(side="left", padx=4)
 
         self.run_btn = tk.Button(root, text="Run", width=32,
                                  command=self.on_run)
@@ -701,11 +719,27 @@ class App:
                     f"larger ROI.")
                 return
 
+        # Parse the timer entry; reject invalid input.
+        timer_text = self.timer_entry.get().strip()
+        timer_seconds: Optional[float] = None
+        if timer_text:
+            try:
+                minutes = float(timer_text)
+                if minutes <= 0:
+                    raise ValueError("non-positive")
+                timer_seconds = minutes * 60
+            except ValueError:
+                messagebox.showerror(
+                    "Automouse",
+                    f"Invalid timer: {timer_text!r}. Enter a positive "
+                    f"number of minutes, or leave blank.")
+                return
+
         self.root.withdraw()
         stopper = _HoldToStop()
         stop_win = tk.Toplevel(self.root)
         stop_win.title("Automouse — running")
-        stop_win.geometry("520x420")
+        stop_win.geometry("520x440")
         stop_win.attributes("-topmost", True)
         tk.Label(stop_win,
                  text="Click loop is running. "
@@ -715,6 +749,30 @@ class App:
         tk.Label(stop_win, textvariable=mem_var).pack(pady=2)
         tk.Button(stop_win, text="Stop", width=20,
                   command=lambda: setattr(stopper, "stop", True)).pack(pady=4)
+
+        if timer_seconds is not None:
+            deadline = time.monotonic() + timer_seconds
+            timer_var = tk.StringVar(
+                value=f"Auto-stop in {_fmt_remaining(timer_seconds)}")
+            tk.Label(stop_win, textvariable=timer_var,
+                     fg="#888").pack(pady=2)
+
+            def tick() -> None:
+                remaining = deadline - time.monotonic()
+                if stopper.stop:
+                    timer_var.set("Stopped.")
+                    return
+                if remaining <= 0:
+                    stopper.stop = True
+                    timer_var.set("Auto-stop fired.")
+                    return
+                timer_var.set(f"Auto-stop in {_fmt_remaining(remaining)}")
+                try:
+                    self.root.after(1000, tick)
+                except tk.TclError:
+                    pass
+
+            self.root.after(1000, tick)
 
         log_frame = tk.Frame(stop_win)
         log_frame.pack(fill="both", expand=True, padx=8, pady=4)
